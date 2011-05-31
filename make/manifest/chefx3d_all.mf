@@ -1,0 +1,15 @@
+Class-Path: xj3d-all_2.0.0.jar elall.jar mlibwrapper_jai.jar 
+ jai_core.jar jai_codec.jar jai_imageio.jar clibwrapper_jiio.jar 
+ l2fprod-common-outlookbar.jar smack.jar smackx.jar 
+ geoapi-nogenerics-2.1.0.jar jts-1.8.jar 
+ gt2-api-2.4.4.jar gt2-coverage-2.4.4.jar gt2-image-2.4.4.jar 
+ gt2-imagemosaic-2.4.4.jar gt2-imagepyramid-2.4.4.jar gt2-main-2.4.4.jar 
+ gt2-metadata-2.4.4.jar gt2-referencing-2.4.4.jar gt2-render-2.4.4.jar 
+ jogl.jar
+Trusted-Only: true
+Extension-Name: ChefX3D
+Specification-Vendor: Yumetech, Inc
+Specification-Version: 1.0
+Implementation-Vendor-Id: com.yumetech
+Implementation-Vendor: Yumetech, Inc
+Implementation-Version: 1.0

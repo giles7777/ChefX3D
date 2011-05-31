@@ -1,0 +1,84 @@
+<html>
+<head>
+<title>ChefX3D - Property Editor Design</title>
+</head>
+
+<body>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+</center>
+
+<h1 align=center>Property Editor Design</h1>
+
+<p>
+Each entity has a set of properties sheets associated with it.  These
+properties are a parameter space for some domain like simulation parmaters, behavior
+parameters or visual properties.
+</p>
+
+<hr/>
+
+<a name="Concepts">
+<h2>Concepts</h2></a>
+
+<h3>Parameter Space Declaration</h3>
+<p>
+ChefX3D uses an XML schema and an instance document to describe a parameter space, its data types,
+and its intial values.  The schema gives a hierarchical structure, parameter names and data types.
+The instance document gives the initial values.  The instance can be tool specific.
+A property editor will turn this data into an editable form.
+<p>
+Current implementation of this only uses an instance document.  Future implementations will use
+a schema for further information.
+</p>
+
+<h3>Undo/Redo</h3>
+A model shall be able to undo/redo changes.  The command list will be a global list of
+changes made to the model.
+
+<h3>Export</h3>
+These property sheets will become the XML space over which exporters will work.  In the current
+implementation this is implemented using a XML Stylesheet.  ChefX3D will add some tool parameters
+to this.  Some of those parameters are the entities location and orientation.
+<hr>
+
+<h3>Data Editors</h3>
+Any parameter can be assigned a data editor.  A data editor is a custom way of editing
+that parameter or an extra feature to go with it.  An example might be a parameter
+representing a file name might include a FileDialogEditor to open a file dialog box to
+fill in its value.
+<p>
+User could should be allowed to create their own custom editors.  Editor's will have an
+API to modify the current property tree including adding or deleting properties.
+<p>
+Editors provided by the system include:
+<ul>
+   <li>File Dialog - Use a File Dialog to select a file name</li>
+   <li>Combo Box - Use a combo box to select a value</li>
+   <li>Increment Number - Increment a number field</li>
+   <li>Decrement Number - Decrement a number field</li>
+   <li>Add Property - Add more properties to this instance</li>
+   <li>Delete Property - Delete properties from this instance</li>
+   <li>Add an Association - Create an association with another entity</li>
+   <li>Delete an Association - Delete an association with another entity</li>
+</ul>
+
+
+<h2>Open Issues</h2>
+
+<hr>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+<br>
+<i>Last Updated: $Date: 2007/03/14 15:58:26 $<br>
+Version: $Revision: 1.1 $</I>
+</center>
+
+</body>
+</html>

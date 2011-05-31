@@ -1,0 +1,4619 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2010
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+import java.util.*;
+import java.util.prefs.Preferences;
+
+import javax.vecmath.AxisAngle4f;
+import javax.vecmath.Matrix4f;
+import javax.vecmath.Vector3d;
+import javax.vecmath.Vector3f;
+
+import org.j3d.util.I18nManager;
+
+//Internal Imports
+import org.chefx3d.model.*;
+import org.chefx3d.view.awt.av3d.*;
+import org.chefx3d.catalog.CatalogManager;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+import org.chefx3d.tool.SimpleTool;
+import org.chefx3d.ui.PopUpConfirm;
+import org.chefx3d.ui.PopUpMessage;
+import org.chefx3d.ui.StatusBar;
+import org.chefx3d.util.ErrorReporter;
+import org.chefx3d.util.ApplicationParams;
+
+/**
+ * Abstract definition for Rule. Rule specifies a single rule and the processes
+ * that make up the rule. A Rule returns a boolean response about the condition
+ * that determines if a Command can be executed or must be rejected and
+ * possibly results in an automatically handled response in the environment.
+ *
+ * Also contains utility functions for all rule classes.
+ *
+ * @author Ben Yarger
+ * @version $Revision: 1.129 $
+ */
+public abstract class Rule {
+    /** Should we log failures reasons for rules */
+    protected static boolean logFailures = false;
+
+    /** Error message for class cast exceptions */
+    private static final String CLASS_CAST_EXCEPTION_MSG =
+        "Rule: sortDescendingPosValueOrder class cast exception.";
+
+    /** Constant threshold value used in angle calculations */
+    private static double ANGLE_CHECK_THRESHOLD = 0.0001;
+
+    /** Constant threshold value used to calculate THRESHOLD */
+    private static final double INIT_THRESHOLD = 0.25;
+
+    /** Auto-span Overlap threshold */
+    public static final float SPAN_OVERLAP_THRESHOLD = 0.002f;
+
+    /** Command list built up during rule engine execution */
+    private static ArrayList<Command> newlyIssuedCommands =
+        new ArrayList<Command>();
+
+    /**
+     * Full command history built up during rule engine execution. Validator
+     * is regularly clearing newlyIssuedCommands, so for reference we will
+     * keep the full history until clear full history is called by the
+     * validator at the beginning of each new validation call.
+     */
+    private static ArrayList<Command> newlyIssuedCommandHistory =
+        new ArrayList<Command>();
+
+    /** Accessor to catalog lookup */
+    protected CatalogManager catalogManager = CatalogManager.getCatalogManager();
+
+    /** Error reporting utility */
+    protected ErrorReporter errorReporter;
+
+    /** Collision checking instance */
+    protected RuleCollisionChecker collisionChecker;
+
+    /** AV3DView instance */
+    protected AV3DView view;
+
+    /** StatusBar messenger */
+    protected StatusBar statusBar = StatusBar.getStatusBar();
+
+    /** Displays a pop up message */
+    protected PopUpMessage popUpMessage = PopUpMessage.getInstance();
+
+    /** Displays a pop up confirm message */
+    protected PopUpConfirm popUpConfirm = PopUpConfirm.getInstance();
+
+    /** Translation utility */
+    protected I18nManager intl_mgr = I18nManager.getManager();
+
+    /** Enumerated rule types */
+    public static enum RULE_TYPE {INVIOLABLE, STANDARD, INFORMATIONAL};
+
+    /** The type of the rule implementation */
+    protected RULE_TYPE ruleType;
+
+    /** The current entity collisions shared between implementing rules */
+    protected static ArrayList<Entity> collisionEntities;
+
+    /** The current entity-children collisions shared between implementing rules */
+    protected static Map<Entity,ArrayList<Entity>> collisionEntitiesMap;
+
+    /** Break out of model entities matching relationship requirements */
+    protected static ArrayList<Entity> entityMatches = new ArrayList<Entity>();
+
+    /** Break out of zone collision entities */
+    protected static ArrayList<Entity> zoneEntityMatches = new ArrayList<Entity>();
+
+    /** Break out of wall collision entities */
+    protected static ArrayList<Entity> wallEntityMatches = new ArrayList<Entity>();
+
+    /** Break out of entities to replace based on REPLACE_PROD_CLASS_PROP */
+    protected static ArrayList<Entity> replaceEntityMatches = new ArrayList<Entity>();
+
+    /** Break out of illegal entities */
+    protected static ArrayList<Entity> illegalEntities = new ArrayList<Entity>();
+
+    /** Map of classifications to number of occurrences */
+    protected static HashMap<String, Integer> entityMatchCountMap = new HashMap<String, Integer>();
+
+    /** Map of classifications to number of occurrences */
+    protected static HashMap<String, Integer> zoneMatchCountMap = new HashMap<String, Integer>();
+
+    /** Map of classifications to number of occurrences */
+    protected static HashMap<String, Integer> wallMatchCountMap = new HashMap<String, Integer>();
+
+
+    private class ChildrenMatches{
+
+        /** Break out of model entities matching relationship requirements */
+        private  ArrayList<Entity> entityMatches = new ArrayList<Entity>();
+
+        /** Break out of zone collision entities */
+        private  ArrayList<Entity> zoneEntityMatches = new ArrayList<Entity>();
+
+        /** Break out of wall collision entities */
+        private  ArrayList<Entity> wallEntityMatches = new ArrayList<Entity>();
+
+        /** Break out of entities to replace based on REPLACE_PROD_CLASS_PROP */
+        private  ArrayList<Entity> replaceEntityMatches = new ArrayList<Entity>();
+
+        /** Break out of illegal entities */
+        private  ArrayList<Entity> illegalEntities = new ArrayList<Entity>();
+
+        /** Map of classifications to number of occurrences */
+        private  HashMap<String, Integer> entityMatchCountMap = new HashMap<String, Integer>();
+
+        /** Map of classifications to number of occurrences */
+        private  HashMap<String, Integer> zoneMatchCountMap = new HashMap<String, Integer>();
+
+        /** Map of classifications to number of occurrences */
+        private  HashMap<String, Integer> wallMatchCountMap = new HashMap<String, Integer>();
+    }
+
+    protected Map<Entity,ChildrenMatches > matchesMap;
+
+    /** NearesetNeighborMeasurement instance */
+    protected static NearestNeighborMeasurement nearestNeighbor;
+
+    //---------------------------------------------------------------
+    // Rule processing entry point
+    //---------------------------------------------------------------
+
+    /**
+     * All instances of Rule should call processRule with the
+     * Command and transient state to convert and process.
+     * Convert expects the Command to
+     * implement RuleDataAccessor. If it doesn't it returns true and
+     * logs a note to the console.
+     *
+     * @param command Command that needs to be converted
+     * @param errorReporter Error reporting object
+     * @param collisionChecker RuleCollisionChecker to use for collisions
+     * @param view AV3DView instance
+     * @return true if command can continue, false otherwise
+     */
+    public boolean processRule(
+            Command command,
+            ErrorReporter errorReporter,
+            RuleCollisionChecker collisionCheck,
+            AV3DView view) {
+
+        /*
+         * Perform rule override analysis.
+         * Return true if overriding standard rules.
+         */
+        String appName = (String) ApplicationParams.get(
+                ApplicationParams.APP_NAME);
+
+
+        // check here for class names and such
+        Class currentClass = this.getClass();
+
+        HashSet<String> ignoreList = command.getIgnoreRuleList();
+        if(ignoreList != null) {
+           if(ignoreList.contains(currentClass.getName())) {
+               return true;
+           }
+        }
+
+        Preferences prefs = Preferences.userRoot().node(appName);
+        Boolean ruleOverride = prefs.getBoolean("overrideRules", false);
+
+        if(ruleType != null &&
+                ruleType == RULE_TYPE.STANDARD &&
+                ruleOverride == true){
+
+            return true;
+        }
+
+        // Continue with execution of the rule
+        this.errorReporter = errorReporter;
+        this.collisionChecker = collisionCheck;
+        this.view = view;
+
+        if(nearestNeighbor == null){
+
+            nearestNeighbor =
+                new NearestNeighborMeasurement(view.getWrapperMap());
+
+        } else {
+
+            nearestNeighbor.updateWrapperMap(view.getWrapperMap());
+        }
+
+        if(command instanceof RuleDataAccessor){
+
+            RuleDataAccessor dataAccessor = (RuleDataAccessor)command;
+
+            Entity entity = dataAccessor.getEntity();
+            WorldModel model = dataAccessor.getWorldModel();
+
+            // Attempted catch to pevent NPE described in bugs 97 & 42 (BJY)
+            if(entity == null){
+
+                errorReporter.debugReport("Rule found command entity was null. Command description: "+command.getDescription(), null);
+                return false;
+            }
+
+            return performCheck(entity, model, command);
+
+        } else {
+
+            errorReporter.debugReport(
+                    "CommandToRuleAdapter did not receive an object of type "+
+                    "RuleDataAccessor.",
+                    null);
+
+            return true;
+        }
+    }
+
+
+    //-------------------------------------------------------------------------
+    // Abstract method definitions
+    //-------------------------------------------------------------------------
+
+    /**
+     * Abstract definition of performCheck which plucks apart the Entity and
+     * WorldModel for the data expected by the rule the adapter communicates
+     * with.
+     *
+     * @param entity Entity object
+     * @param model WorldModel object
+     * @param command Command object
+     * @return boolean true if rule checks out, false otherwise
+     */
+    protected abstract boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command);
+
+    //-------------------------------------------------------------------------
+    // Public methods
+    //-------------------------------------------------------------------------
+
+    /**
+     * Get the local bounds of this entity.  This takes the
+     * current size and offset and uses the new scale to calculate
+     * the bounds that would result by the request
+     *
+     * @param entity The entity being processed
+     * @param scale The new scale being requested
+     * @param bounds a float array of length six to hold the
+     * local bounds of this entity.
+     */
+    public void calculateBounds(
+            PositionableEntity entity,
+            float[] scale,
+            float[] bounds){
+        float[] size = new float[3];
+        double[] originOffset = new double[3];
+
+        entity.getSize(size);
+        entity.getOriginOffset(originOffset);
+
+        float halfXWidth = (size[0]*scale[0])/2f;
+        float halfYWidth = (size[1]*scale[1])/2f;
+        float halfZWidth = (size[2]*scale[2])/2f;
+
+        bounds[0] = -halfXWidth + (float)originOffset[0];
+        bounds[1] = halfXWidth + (float)originOffset[0];
+        bounds[2] = -halfYWidth + (float)originOffset[1];
+        bounds[3] = halfYWidth + (float)originOffset[1];
+        bounds[4] = -halfZWidth + (float)originOffset[2];
+        bounds[5] = halfZWidth + (float)originOffset[2];
+    }
+
+    /**
+     * Clear the newlyIssuedCommands ArrayList.
+     */
+    public static void clearNewlyIssuedCommands(){
+
+        newlyIssuedCommands.clear();
+    }
+
+    public static void clearNewlyIssuedCommandsFullHistory() {
+
+        newlyIssuedCommandHistory.clear();
+    }
+
+    /**
+     * Get the newlyIssuedCommands ArrayList
+     *
+     * @return ArrayList<Command>
+     */
+    public static ArrayList<Command> getNewlyIssuedCommands(){
+
+        return newlyIssuedCommands;
+    }
+
+    public static ArrayList<Command> getNewlyIssuedCommandsFullHistory() {
+
+        return newlyIssuedCommandHistory;
+    }
+
+    /**
+     * Get the size of the newlyIssuedCommands ArrayList
+     * @return size of list
+     */
+    public static int newlyIssuedCommandSize(){
+
+        return newlyIssuedCommands.size();
+    }
+
+    /**
+     * See if there are newly issued commands
+     * @return True if new commands exist, false otherwise
+     */
+    public static boolean hasNewlyIssuedCommands(){
+
+        if(newlyIssuedCommandSize() > 0){
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Finds the closest snap value for the original value.
+     *
+     * @param originalValue Original axis value
+     * @param snaps Associated array of same axis snap values to compare with
+     * @return double replacement value for the original
+     */
+    public static double findClosestValue(double originalValue, float[] snaps){
+
+        Arrays.sort(snaps);
+        double newValue = snaps[0];
+
+        /*
+         * start from the beginning of the ordered snap values and see at what
+         * point the original value is less than the snap the snap.
+         */
+        for(int i = 1; i < snaps.length; i++){
+
+             if(originalValue > ((snaps[i] - snaps[i-1])/2.0f + snaps[i-1])){
+
+                 newValue = snaps[i];
+             } else {
+                 break;
+             }
+        }
+
+        return newValue;
+    }
+
+    /**
+     * Calculate the zoom threshold for tolerance calculations. Zoom factor
+     * will return an acceptable offset of .25 m for a distance of 10 units
+     * between the zoom position and the active zone. The thresholdConst
+     * can be used to implement a fixed threshold value in addition to the
+     * calculated value so that a standard result of 0.0 would return whatever
+     * the thresholdConst is set to and a result of 0.25 would return
+     * 0.25 + thresholdConst.
+     *
+     * @param view Active AV3DView to get zoom value for
+     * @param thresholdConst Specific threshold constant to add, can be null
+     * @return threshold value
+     */
+    public static double getZoomThreshold(AV3DView view, Double thresholdConst){
+
+        double zoom = view.getZoneViewZoomAmount();
+
+        if(thresholdConst != null){
+
+            if (thresholdConst > 1.0) {
+                thresholdConst = 1.0;
+            } else if (thresholdConst < 0) {
+                thresholdConst = 0.0;
+            }
+
+        } else {
+            thresholdConst = 0.0;
+        }
+
+        double resultThreshold = zoom / 10.0 * INIT_THRESHOLD + thresholdConst;
+
+        return resultThreshold;
+    }
+
+
+    //-------------------------------------------------------------------------
+    // Protected methods
+    //-------------------------------------------------------------------------
+
+    /**
+     * Perform collision check on command. Will always use surrogates.
+     */
+    protected void performCollisionCheck(Command command) {
+        performCollisionCheck(command, true);
+    }
+
+    /**
+     * Perform collision check on command.  Compares the current entity against the scene.
+     * The result is placed into the collisionEntitiesMap.
+     *
+     * @param command Command to examine
+     * @param useSurrogates Flag to use surrogates or not
+     */
+    protected void performCollisionCheck(Command command, boolean useSurrogates){
+
+        // Make sure we have an EntityCollisionManager
+        if(collisionChecker == null){
+
+            errorReporter.fatalErrorReport(
+                    "Unable to access the collision detection system from the rules.",
+                    null);
+        }
+
+        // make sure we have a valid command
+        if (command == null || !(command instanceof RuleDataAccessor)) {
+            collisionEntities = null;
+            return;
+        }
+
+        // make sure we have an entity
+        Entity entity = ((RuleDataAccessor)command).getEntity();
+        if (entity == null) {
+            collisionEntities = null;
+            return;
+        }
+
+        // Get the collision results
+        String url_string = entity.getModelURL();
+
+        if(url_string != null){
+            collisionEntities = collisionChecker.submitCommand(command, useSurrogates);
+        } else {
+            collisionEntities = null;
+            return;
+        }
+
+        // Remove any mapped child that is set to be removed with the current
+        // command execution.
+        //
+        // Also remove any collision that is set to be removed with the current
+        // command execution.
+        ArrayList<Entity> entitiesBeingRemoved =
+            getNewlyIssuedRemoveCommandEntities();
+
+        if(collisionEntities != null) {
+
+            for (int k = (collisionEntities.size() - 1); k >= 0; k--) {
+
+               Entity colEntity = collisionEntities.get(k);
+
+               for (int j = 0; j < entitiesBeingRemoved.size(); j++) {
+
+                   if (colEntity == entitiesBeingRemoved.get(j)) {
+                       collisionEntities.remove(k);
+                       break;
+                   }
+               }
+           }
+        }
+
+        // Perform the forced parent entity addition to the collision set if
+        // 1) Entity is now in a placement mode
+        // 2) PARENT_AS_COLLISION_ALTERNATE is true
+        // 3) the collision set doesn't already contain the entity
+        if(command instanceof RuleDataAccessor){
+
+            WorldModel model = ((RuleDataAccessor)command).getWorldModel();
+
+            Boolean forceParentCollision = (Boolean)
+                RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.PARENT_AS_COLLISION_ALTERNATE);
+
+            /*
+             * If shadow entity, don't bother with this check.
+             */
+            Boolean isShadow =
+                (Boolean)entity.getProperty(
+                        entity.getParamSheetName(),
+                        Entity.SHADOW_ENTITY_FLAG);
+
+            if (isShadow != null && isShadow == true) {
+                return;
+            }
+
+            if(forceParentCollision != null && forceParentCollision == true){
+
+                int parentEntityID = entity.getParentEntityID();
+
+                Entity parentEntity = model.getEntity(parentEntityID);
+
+                // Need to handle add command sepecial cases
+                if(command instanceof AddEntityChildCommand){
+
+                    parentEntity =
+                        ((AddEntityChildCommand)command).getParentEntity();
+
+                } else if (command instanceof AddEntityChildTransientCommand){
+
+                    parentEntity =
+                        ((AddEntityChildTransientCommand)command).
+                        getParentEntity();
+
+                }
+
+                // Never add a null entity to the collision list
+                if(parentEntity == null) {
+                    return;
+                }
+
+                // Never add a segment or zone to the collision list
+                if(parentEntity.getType() != Entity.TYPE_MODEL) {
+                    return;
+                }
+
+                for(int i = 0; i < collisionEntities.size(); i++) {
+
+                    if(collisionEntities.get(i).getEntityID() ==
+                        parentEntity.getEntityID()){
+
+                        // Exit and don't bother adding because it is already
+                        // in the collision set.
+                        return;
+                    }
+                }
+
+                collisionEntities.add(parentEntity);
+            }
+        }
+    }
+
+    /**
+    * Perform collision check on command.  Compares the current entity and all of its children
+    * against the scene.  The result is placed into the collisionEntitiesMap.
+    */
+   protected void performExtendedCollisionCheck(Command command){
+
+       // Make sure we have an EntityCollisionManager
+       if(collisionChecker == null){
+
+           errorReporter.fatalErrorReport(
+                   "Unable to access the collision detection system from the rules.",
+                   null);
+       }
+
+       // Get the collision results
+       String url_string =
+           ((RuleDataAccessor)command).getEntity().getModelURL();
+
+//System.out.println("url: " + url_string);
+       if(url_string != null){
+           collisionEntitiesMap = collisionChecker.submitCommandExtended(command);
+//System.out.println("col entities: " + collisionEntitiesMap.size());
+       } else {
+//System.out.println("col entities null");
+           collisionEntitiesMap = null;
+       }
+
+       // Remove any mapped child that is set to be removed with the current
+       // command execution.
+       //
+       // Also remove any collision that is set to be removed with the current
+       // command execution.
+       ArrayList<Entity> entitiesBeingRemoved =
+           getNewlyIssuedRemoveCommandEntities();
+
+       if(collisionEntitiesMap != null &&
+               !collisionEntitiesMap.isEmpty()) {
+
+           Object[] keyArray= collisionEntitiesMap.keySet().toArray();
+
+           for(int i = 0; i<keyArray.length; i++) {
+
+               Entity tmpE = (Entity) keyArray[i];
+               boolean tmpERemoved = false;
+
+               for (int j = 0; j < entitiesBeingRemoved.size(); j++) {
+
+                   if (tmpE == entitiesBeingRemoved.get(j)) {
+//System.out.println("remove tmpE: " + tmpE);
+                       collisionEntitiesMap.remove(tmpE);
+                       tmpERemoved = true;
+                       break;
+                   }
+               }
+
+               if (!tmpERemoved) {
+
+                   ArrayList<Entity> matchedCollisions =
+                       collisionEntitiesMap.get(tmpE);
+
+                   if (matchedCollisions != null) {
+
+                       for (int k = (matchedCollisions.size() - 1);
+                           k >= 0;
+                           k--) {
+
+                           Entity colEntity = matchedCollisions.get(k);
+
+                           for (int j = 0; j < entitiesBeingRemoved.size(); j++) {
+
+                               if (colEntity == entitiesBeingRemoved.get(j)) {
+                                   matchedCollisions.remove(k);
+                                   break;
+                               }
+                           }
+                       }
+                   }
+               }
+           }
+       }
+
+       // Remove any mapped child that is an invisible child, in other words
+       // has no model.
+       if(collisionEntitiesMap != null &&
+               !collisionEntitiesMap.isEmpty()) {
+
+           Object[] keyArray= collisionEntitiesMap.keySet().toArray();
+
+           for(int i = 0; i<keyArray.length; i++) {
+
+               Entity currentEntity = (Entity)keyArray[i];
+
+               Boolean noModel =
+                   (Boolean) RulePropertyAccessor.getRulePropertyValue(
+                           currentEntity,
+                           ChefX3DRuleProperties.NO_MODEL_PROP);
+
+               if (noModel) {
+//System.out.println("remove ic: " + currentEntity);
+                   collisionEntitiesMap.remove(currentEntity);
+               }
+           }
+       }
+   }
+
+
+    /**
+     * Collision check used by add commands that results in a
+     * re-parenting action in order to guarantee collision results.
+     * Typically used by auto place actions.
+     *
+     * @param model WorldModel
+     * @param parentEntityParentEntity Parent entity's parent
+     * @param parentEntity Entity's parent Entity
+     * @param entity Entity that started this whole mess.
+     */
+    protected void performSpecialAddCollisionCheck(
+            WorldModel model,
+            Entity parentEntityParentEntity,
+            Entity parentEntity,
+            Entity entity){
+
+        /*
+         * Extract and save the original parent entity id and position of the
+         * entity to add back at the end.
+         */
+        int originalEntityParentID = entity.getParentEntityID();
+        double[] relPosition = new double[3];
+        double[] parentPos = new double[3];
+
+        ((PositionableEntity)entity).getPosition(relPosition);
+        ((PositionableEntity)parentEntity).getPosition(parentPos);
+
+        parentPos[0] = parentPos[0] + relPosition[0];
+        parentPos[1] = parentPos[1] + relPosition[1];
+        parentPos[2] = parentPos[2] + relPosition[2];
+
+        float[] eBounds = new float[6];
+        ((PositionableEntity)entity).getBounds(eBounds);
+
+        entity.setParentEntityID(parentEntityParentEntity.getEntityID());
+        ((PositionableEntity)entity).setPosition(parentPos, false);
+
+        AddEntityChildCommand addChildCmd =
+            new AddEntityChildCommand(model, parentEntityParentEntity, entity);
+
+        performCollisionCheck(addChildCmd);
+
+        /*
+         * Reset the original parent id and position.
+         */
+        entity.setParentEntityID(originalEntityParentID);
+        ((PositionableEntity)entity).setPosition(relPosition, false);
+    }
+
+    /**
+     * Shortcut helper for most typical collision analysis checks.
+     *
+     * @param entity Entity to extract requisite data from
+     * @param ghostEntities Ghost entities not yet in the scene to consider
+     * @param ignoreSameClass Ignore collision objects with same classification
+     * @param ignoreEntityIdList List of entity id's to ignore in collision set
+     * @param ignoreChildren Flags if the children should be ignored
+     * @return True if succeeded, false if there was a problem extracting data
+     */
+    protected boolean performCollisionAnalysisHelper(
+            Entity entity,
+            Entity[] ghostEntities,
+            boolean ignoreSameClass,
+            int[] ignoreEntityIdList,
+            boolean ignoreChildren){
+
+        String[] classifications = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+        String[] classRelationship = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+        int[] relationshipAmount = (int[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP);
+
+        Enum[] relModifier = (Enum[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP);
+
+        String[] colReplaceClass = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.REPLACE_PROD_CLASS_PROP);
+
+        if(classRelationship == null ||
+                relationshipAmount == null ||
+                relModifier == null){
+
+            return false;
+        }
+
+        ArrayList<Entity> childrenToIgnore = new ArrayList<Entity>();
+
+        if (ignoreChildren) {
+            childrenToIgnore = entity.getChildren();
+        }
+
+        int maxIndex = Math.min(
+                (Math.min(
+                        classRelationship.length,
+                        relationshipAmount.length)),
+                relModifier.length);
+
+        return performCollisionAnalysis(
+                classRelationship,
+                classifications,
+                childrenToIgnore,
+                colReplaceClass,
+                maxIndex,
+                ghostEntities,
+                ignoreSameClass,
+                ignoreEntityIdList);
+    }
+
+    /**
+     * Shortcut helper for most typical collision analysis checks for children.
+     *
+     * @param entity Entity to extract requisite data from
+     * @param ghostEntities Ghost entities not yet in the scene to consider
+     * @param ignoreSameClass Ignore collision objects with same classification
+     * @param ignoreEntityIdList List of entity id's to ignore in collision set
+     * @return True if succeeded, false if there was a problem extracting data
+     */
+    protected boolean performExtendedCollisionAnalysisHelper(
+            Entity[] ghostEntities,
+            boolean ignoreSameClass,
+            int[] ignoreEntityIdList){
+
+        if(collisionEntitiesMap == null ||
+                collisionEntitiesMap.isEmpty())
+            return false;
+
+        Object[] keyArray= collisionEntitiesMap.keySet().toArray();
+
+        for(int i = 0 ; i<keyArray.length;i++) {
+
+            Entity currentEntity = (Entity)keyArray[i];
+
+            String[] classifications = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        currentEntity,
+                        ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+            String[] classRelationship = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        currentEntity,
+                        ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+            int[] relationshipAmount = (int[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        currentEntity,
+                        ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP);
+
+            Enum[] relModifier = (Enum[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        currentEntity,
+                        ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP);
+
+            String[] colReplaceClass = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        currentEntity,
+                        ChefX3DRuleProperties.REPLACE_PROD_CLASS_PROP);
+
+
+            if(classRelationship == null ||
+                    relationshipAmount == null ||
+                    relModifier == null){
+
+                return false;
+            }
+
+            int maxIndex = Math.min(
+                    (Math.min(
+                            classRelationship.length,
+                            relationshipAmount.length)),
+                    relModifier.length);
+
+
+            if(matchesMap == null)
+                matchesMap = new HashMap<Entity,ChildrenMatches>();
+
+            ChildrenMatches match = new ChildrenMatches();
+            performExtendedCollisionAnalysis(
+                    collisionEntitiesMap.get(currentEntity),
+                    match,
+                    classRelationship,
+                    classifications,
+                    currentEntity.getChildren(),
+                    colReplaceClass,
+                    maxIndex,
+                    ghostEntities,
+                    ignoreSameClass,
+                    ignoreEntityIdList);
+            this.matchesMap.put(currentEntity, match);
+
+        }
+
+        return false;
+
+
+
+    }
+
+
+    /**
+     * Begin collision results analysis:
+     *
+     * Separate collisions into the following types:
+     * TYPE_MODEL       (classification relationship matching only)
+     * TYPE_ZONE        (floor)
+     * TYPE_SEGMENT     (wall)
+     *
+     * @param classRelationship String[] of relationship names of current entity
+     * @param classification String[] of classification names of current entity - used only if ignoreSameClass is true
+     * @param childrenToIgnore ArrayList<Entity> children to remove from collision list
+     * @param classificationToReplace String[] of classifications to replace
+     * @param maxIndex Number of classRelationship indexes to check
+     * @param vaporEntities Entity[] entities not yet in the scene to consider
+     * @param ignoreSameClass If true collision objects with same
+     * classification will be ignored
+     * @param ignoreEntityIdList list of entity id's to ignore
+     * @return True if ok, false if couldn't match valid collisions to categories
+     */
+    protected boolean performCollisionAnalysis(
+            String[] classRelationship,
+            String[] classification,
+            ArrayList<Entity> childrenToIgnore,
+            String[] classificationToReplace,
+            int maxIndex,
+            Entity[] vaporEntities,
+            boolean ignoreSameClass,
+            int[] ignoreEntityIdList){
+
+        entityMatches = new ArrayList<Entity>();
+        zoneEntityMatches = new ArrayList<Entity>();
+        wallEntityMatches = new ArrayList<Entity>();
+        replaceEntityMatches = new ArrayList<Entity>();
+        illegalEntities = new ArrayList<Entity>();
+        entityMatchCountMap = new HashMap<String, Integer>();
+        zoneMatchCountMap = new HashMap<String, Integer>();
+        wallMatchCountMap = new HashMap<String, Integer>();
+
+        // If nothing to compare, stop analysis
+        if(classRelationship == null){
+            return true;
+        }
+
+        /*
+         * Add entities to the collision list that otherwise would never
+         * be picked up in a collision case. Allows forced compliance
+         * with collision requirements.
+         */
+        if(vaporEntities != null){
+
+            if(collisionEntities == null){
+                collisionEntities = new ArrayList<Entity>();
+            }
+
+            for(int i = 0; i < vaporEntities.length; i++){
+
+                if(!collisionEntities.contains(vaporEntities[i])){
+                    collisionEntities.add(vaporEntities[i]);
+                }
+            }
+        }
+
+        if(collisionEntities == null){
+            return true;
+        }
+
+        // Remove specific entities from the collision list
+        if(ignoreEntityIdList != null){
+
+            for(int i = 0; i < ignoreEntityIdList.length; i++){
+
+                for(int j = collisionEntities.size() - 1; j >= 0; j--){
+
+                    if(collisionEntities.get(j).getEntityID() ==
+                        ignoreEntityIdList[i]){
+
+                        collisionEntities.remove(j);
+                    }
+                }
+            }
+        }
+
+        /*
+         * Remove children from collision entities list
+         */
+        if(childrenToIgnore != null){
+            for(int i = 0; i < childrenToIgnore.size(); i++){
+
+                if(collisionEntities.contains(childrenToIgnore.get(i))){
+
+                    collisionEntities.remove(childrenToIgnore.get(i));
+                }
+            }
+        }
+
+        /*
+         * Loop through all of the entities in collision with moving entity.
+         * Look for class relationships to define legal collisions and
+         * build up the map of relationship names to entities.
+         */
+        ArrayList<String> collisionClassificationList = new ArrayList<String>();
+        ArrayList<Entity> collisionEntityList = new ArrayList<Entity>();
+
+        for(int w = collisionEntities.size() - 1; w >= 0; w--){
+
+            Entity entityObj = collisionEntities.get(w);
+
+            String[] colObjClass = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        entityObj,
+                        ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+            if(colObjClass != null){
+
+                /*
+                 * Extract children from collision entities that
+                 * would be replaced by entity.
+                 */
+                if(classificationToReplace != null){
+
+                    boolean classMatchFound = false;
+
+                    for(int i = 0; i < classificationToReplace.length; i++){
+
+                        for(int j = 0; j < colObjClass.length; j++){
+
+                            if(classificationToReplace[i].equals(
+                                    colObjClass[j])){
+
+                                addReplaceMatch(entityObj);
+                                collisionEntities.remove(w);
+                                classMatchFound = true;
+                                break;
+                            }
+                        }
+
+                        if(classMatchFound){
+                            break;
+                        }
+                    }
+
+                    if(classMatchFound){
+                        continue;
+                    }
+                }
+
+                /*
+                 * If ignoreSameClass is set, look for same classification
+                 * name and if found skip evaluation for that index, and
+                 * remove the entity from the collisionEntities list.
+                 */
+                if(ignoreSameClass && classification != null){
+
+                    boolean classMatchFound = false;
+
+                    for(int i = 0; i < colObjClass.length; i++){
+
+                        for(int j = 0; j < classification.length; j++){
+
+                            if(colObjClass[i].equals(classification[j])){
+                                 classMatchFound = true;
+                                 collisionEntities.remove(w);
+                                 break;
+                            }
+                        }
+
+                        if(classMatchFound){
+                            break;
+                        }
+                    }
+
+                    if(classMatchFound){
+                        continue;
+                    }
+                }
+
+                for(int i = 0; i < colObjClass.length; i++){
+
+                    collisionClassificationList.add(colObjClass[i]);
+                    collisionEntityList.add(entityObj);
+                }
+            }
+        }
+
+        /*
+         * Make sure collision matches a relationship classification type.
+         * If the classRelationship contains the : character, tokenize the
+         * string and examine each part for a match. Either way, check
+         * matches for the entity type and assign to the correct list.
+         */
+        for(int i = 0; i < maxIndex; i++){
+
+            illegalEntities.clear();
+
+            // Check for : character
+            if(classRelationship[i].contains(":")){
+
+                // For proper analysis we cannot have multiple entries with
+                // the same name in a relClass so clean it
+                HashMap<String, Integer> cleanedClassRelationship =
+                    cleanClassRelationship(classRelationship[i]);
+
+                Object[] keys =
+                    cleanedClassRelationship.keySet().toArray();
+
+                String token;
+
+                for (int x = 0; x < keys.length; x++) {
+
+                    token = (String) keys[x];
+
+                    for(int w = 0; w < collisionClassificationList.size(); w++){
+
+                        String colClass = collisionClassificationList.get(w);
+
+                        if(colClass.equals(token)){
+
+                            Entity entityObj = collisionEntityList.get(w);
+
+                            if(entityObj.getType() == Entity.TYPE_MODEL){
+
+                                addModelMatch(entityObj, colClass);
+                            } else if (entityObj.getType() == Entity.TYPE_ZONE){
+
+                                addZoneMatch(entityObj, colClass);
+
+                            } else if (entityObj.getType() == Entity.TYPE_SEGMENT) {
+
+                                addSegmentMatch(entityObj, colClass);
+
+                            }
+                        }
+                    }
+                }
+
+            } else {
+
+                for(int w = 0; w < collisionClassificationList.size(); w++){
+
+                    String colClass = collisionClassificationList.get(w);
+
+                    if(colClass.equals(classRelationship[i])){
+
+                        Entity entityObj = collisionEntityList.get(w);
+
+                        if(entityObj.getType() == Entity.TYPE_MODEL){
+
+                            addModelMatch(entityObj, colClass);
+
+                        } else if (entityObj.getType() == Entity.TYPE_ZONE){
+
+                            addZoneMatch(entityObj, colClass);
+
+                        } else if (entityObj.getType() == Entity.TYPE_SEGMENT) {
+
+                            addSegmentMatch(entityObj, colClass);
+
+                        }
+                    }
+                }
+            }
+
+            int validMatches =
+                entityMatches.size() +
+                zoneEntityMatches.size() +
+                wallEntityMatches.size();
+
+            if (validMatches != collisionEntities.size()){
+
+                try{
+                    illegalEntities.addAll(collisionEntities);
+
+                    illegalEntities.removeAll(entityMatches);
+                    illegalEntities.removeAll(zoneEntityMatches);
+                    illegalEntities.removeAll(wallEntityMatches);
+
+                } catch (UnsupportedOperationException uoe){
+
+                    errorReporter.fatalErrorReport(
+                            "Unable to create illegal entities list",
+                            uoe);
+                }
+
+                entityMatches.clear();
+                zoneEntityMatches.clear();
+                wallEntityMatches.clear();
+                entityMatchCountMap.clear();
+                zoneMatchCountMap.clear();
+                wallMatchCountMap.clear();
+
+            } else {
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Begin collision results analysis for collision tree results. These
+     * results come from an entity and all of its children being evaluated for
+     * collisions at the same time.
+     *
+     * Separate collisions into the following types:
+     * TYPE_MODEL       (classification relationship matching only)
+     * TYPE_ZONE        (floor)
+     * TYPE_SEGMENT     (wall)
+     *
+     * @param collisionList Collision results for the specific entity
+     * @param matches Specific entity in the tree of entities tested
+     * @param classRelationship String[] of relationship names of current entity
+     * @param classification String[] of classification names of current entity - used only if ignoreSameClass is true
+     * @param childrenToIgnore ArrayList<Entity> children to remove from collision list
+     * @param classificationToReplace String[] of classifications to replace
+     * @param maxIndex Number of classRelationship indexes to check
+     * @param vaporEntities Entity[] entities not yet in the scene to consider
+     * @param ignoreSameClass If true collision objects with same
+     * classification will be ignored
+     * @param ignoreEntityIdList list of entity id's to ignore
+     * @return True if ok, false if couldn't match valid collisions to categories
+     */
+    protected boolean performExtendedCollisionAnalysis(
+            ArrayList<Entity> collisionList,
+            ChildrenMatches matches,
+            String[] classRelationship,
+            String[] classification,
+            ArrayList<Entity> childrenToIgnore,
+            String[] classificationToReplace,
+            int maxIndex,
+            Entity[] vaporEntities,
+            boolean ignoreSameClass,
+            int[] ignoreEntityIdList){
+
+        // Replace the collisionEntities list with the specific collision
+        // results for the matched set
+        if(collisionEntities == null){
+            collisionEntities = new ArrayList<Entity>();
+        }
+
+        collisionEntities.clear();
+        collisionEntities.addAll(collisionList);
+
+        boolean result = performCollisionAnalysis(
+                classRelationship,
+                classification,
+                childrenToIgnore,
+                classificationToReplace,
+                maxIndex,
+                vaporEntities,
+                ignoreSameClass,
+                ignoreEntityIdList);
+
+        matches.entityMatches.clear();
+        matches.zoneEntityMatches.clear();
+        matches.wallEntityMatches.clear();
+        matches.replaceEntityMatches.clear();
+        matches.illegalEntities.clear();
+        matches.entityMatchCountMap.clear();
+        matches.zoneMatchCountMap.clear();
+        matches.wallMatchCountMap.clear();
+
+        matches.entityMatches.addAll(entityMatches);
+        matches.zoneEntityMatches.addAll(zoneEntityMatches);
+        matches.wallEntityMatches.addAll(wallEntityMatches);
+        matches.replaceEntityMatches.addAll(replaceEntityMatches);
+        matches.illegalEntities.addAll(illegalEntities);
+        matches.entityMatchCountMap.putAll(entityMatchCountMap);
+        matches.zoneMatchCountMap.putAll(zoneMatchCountMap);
+        matches.wallMatchCountMap.putAll(wallMatchCountMap);
+
+        return result;
+    }
+
+
+
+    /**
+     * Helper to extract required rule properties from the entity and hand off
+     * to illegal collision check.
+     *
+     * @param entity Entity to examine
+     * @return True if there are illegal collisions, false otherwise
+     */
+    protected boolean hasIllegalCollisionHelper(
+            Entity entity){
+
+        String[] classRelationship = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+        int[] relationshipAmount = (int[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP);
+
+        Enum[] relModifier = (Enum[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP);
+
+
+        if(classRelationship == null ||
+                relationshipAmount == null ||
+                relModifier == null){
+
+            return true;
+        }
+
+        boolean result =
+            hasIllegalCollisions(
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+
+        return result;
+    }
+
+    /**
+     * Helper to extract required rule properties from the entity and hand off
+     * to illegal collision check.
+     *
+     * @param entity Entity to examine
+     * @return True if there are illegal collisions, false otherwise
+     */
+    protected boolean hasIllegalCollisionExtendedHelper(){
+
+        if(collisionEntitiesMap == null)
+            return true;
+
+        if(collisionEntitiesMap.isEmpty())
+            return false;
+
+        Object[] keyArray= collisionEntitiesMap.keySet().toArray();
+
+        for(int i = 0 ; i<keyArray.length;i++) {
+
+            Entity entity = (Entity)keyArray[i];
+            String[] classRelationship = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+            int[] relationshipAmount = (int[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP);
+
+            Enum[] relModifier =
+                (Enum[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                        ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP);
+
+            //
+            // EMF: If there are no collisions, and the relationships
+            // do not allow zero collisions, return true: illegal state
+            //
+            if( collisionEntitiesMap.get(entity).size() == 0){
+                if(! Arrays.asList(classRelationship).contains(
+                    ChefX3DRuleProperties.RESERVED_NONE_RELATIONSHIP))
+                    return true;
+            }
+
+            if(classRelationship == null ||
+                    relationshipAmount == null ||
+                    relModifier == null){
+
+                return true;
+            }
+
+            ChildrenMatches match = matchesMap.get(entity);
+
+            boolean result =
+                hasIllegalCollisions(
+                        match,
+                        classRelationship,
+                        relationshipAmount,
+                        relModifier);
+
+            if(result==true) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Makes sure the collisionEntitiesMap results are appropriate in that
+     * there are results to examine. If there aren't any collision results for
+     * an entity, it is required the None relationship is specified to allow
+     * it to be legal.
+     *
+     * @return True if collision results exist, false otherwise
+     */
+    protected boolean legalZeroCollisionExtendedCheck() {
+
+        if(collisionEntitiesMap.size() > 0){
+
+            // clone the other properties
+            Iterator<Map.Entry<Entity, ArrayList<Entity>>> collisionSet =
+                collisionEntitiesMap.entrySet().iterator();
+
+            while (collisionSet.hasNext()) {
+
+                Map.Entry<Entity, ArrayList<Entity>> mapEntry =
+                    collisionSet.next();
+
+                Entity entity = mapEntry.getKey();
+
+                ArrayList<Entity> collisionResults = mapEntry.getValue();
+
+                if (collisionResults.size() < 1) {
+
+                    // If the reserved class relationship of None is used then,
+                    // we will allow this case.
+                    String[] relClass = (String[])
+                        RulePropertyAccessor.getRulePropertyValue(
+                                entity,
+                                ChefX3DRuleProperties.
+                                RELATIONSHIP_CLASSIFICATION_PROP);
+
+                    if(relClass != null) {
+
+                        for(int i = 0; i < relClass.length; i++) {
+
+                            if(relClass[i].equalsIgnoreCase(
+                                    ChefX3DRuleProperties.
+                                    RESERVED_NONE_RELATIONSHIP)) {
+
+                                return true;
+                            }
+                        }
+                    }
+
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Checks if there are any illegal collisions.
+     *
+     * @param classRelationship String[]
+     * @param relationshipAmount int[]
+     * @param relModifier Enum[]
+     * @return true if there are illegal collisions, false otherwise
+     */
+    protected boolean hasIllegalCollisions(
+            String[] classRelationship,
+            int[] relationshipAmount,
+            Enum[] relModifier){
+
+        // Each legal collision check will return the index of the legal case
+        // that was found or -1 for nothing to evaluate. If -2 is returned in
+        // any of these cases that indicates the data provided did not result
+        // in any matches and therefore should be handled appropriately.
+
+        int illegalZoneRes = hasLegalZoneCollisions(
+                classRelationship,
+                relationshipAmount,
+                relModifier);
+
+        int illegalSegRes = hasLegalSegmentCollisions(
+                classRelationship,
+                relationshipAmount,
+                relModifier);
+
+        int illegalModelRes = hasLegalModelCollisions(
+                classRelationship,
+                relationshipAmount,
+                relModifier);
+
+        int crossCategoryRes = checkCrossCategoryCollisions(
+                classRelationship,
+                relationshipAmount,
+                relModifier);
+
+        // If cross category check comes back as valid, then we don't care
+        // about anything else. If it doesn't we want to make sure the
+        // straight up individual cases are valid, otherwise we do have
+        // an illegal collision.
+        if (crossCategoryRes > -1) {
+            return false;
+        }
+
+        // Check individual cases as a backup.
+        if(illegalZoneRes == -2 ||
+                illegalSegRes == -2 ||
+                illegalModelRes == -2){
+
+            if (logFailures) {
+                if (illegalZoneRes == -2)
+                    logFailure("hasIllegalCollisions1 Zone");
+                if (illegalSegRes == -2)
+                    logFailure("hasIllegalCollisions1 Segment");
+                if (illegalModelRes == -2)
+                    logFailure("hasIllegalCollisions1 Model");
+            }
+            return true;
+
+        } else if (crossCategoryRes == -2){
+
+            // Cross category results is a special case since a single
+            // relationship could be satisfied and yet this could come
+            // back as -2 indicating no satisfied cross classification
+            // reference is satisfied. Yes, classification and category
+            // are used interchangeably here. If we have satisfied one
+            // of the earlier cases, then we don't have to worry
+            // about the cross category case. That is what we
+            // evaluate here.
+            if(illegalZoneRes >= 0){
+                ;
+            } else if (illegalSegRes >= 0){
+                ;
+            } else if (illegalModelRes >= 0){
+                ;
+            } else {
+                if (logFailures)
+                    logFailure("hasIllegalCollisions2");
+
+                return true;
+            }
+        } else if(illegalEntities.size() > 0) {
+            if (logFailures){
+                logFailure("hasIllegalCollisions3");
+                printCollisionEntitiesMap();
+                printCollisionEntitiesList();
+            }
+            // Immediately check for illegal collision matches
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Determines if the zone collisions are all legal. If any are not legal
+     * collisions, the check will return either -2 or -1 depending on the
+     * issue.
+     *
+     * @param classRelationship String[]
+     * @param relationshipAmount int[]
+     * @param relModifier Enum[]
+     * @return index of matching classification, otherwise -1 if nothing to
+     * check, -2 if illegal collision found
+     */
+    protected int hasLegalZoneCollisions(
+            String[] classRelationship,
+            int[] relationshipAmount,
+            Enum[] relModifier){
+
+        if (classRelationship == null ||
+                relationshipAmount == null ||
+                relModifier == null) {
+            return -2;
+        }
+
+        for(int i = 0; i < classRelationship.length; i++){
+
+            // Check for : character, otherwise standard check
+            if(classRelationship[i].contains(":")){
+
+                // For proper analysis we cannot have multiple entries with
+                // the same name in a relClass so clean it
+                HashMap<String, Integer> cleanedClassRelationship =
+                    cleanClassRelationship(classRelationship[i]);
+
+                Object[] keys =
+                    cleanedClassRelationship.keySet().toArray();
+
+                String token;
+
+                boolean matchesFound = true;
+
+                for (int x = 0; x < keys.length; x++) {
+
+                    token = (String) keys[x];
+                    int amt = cleanedClassRelationship.get(token);
+
+                    if (amt == 1) {
+                        amt = relationshipAmount[i];
+                    }
+
+                    if(!legalAssociationNumber(
+                        zoneMatchCountMap.get(token),
+                        amt,
+                        (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)relModifier[i])){
+
+                        matchesFound = false;
+                        break;
+                    }
+                }
+
+                if(!matchesFound){
+                    continue;
+                }
+
+                return i;
+
+            } else if(legalAssociationNumber(
+                        zoneMatchCountMap.get(classRelationship[i]),
+                        relationshipAmount[i],
+                        (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)relModifier[i])){
+
+                return i;
+            }
+        }
+
+        if(zoneMatchCountMap != null && zoneMatchCountMap.size() > 0){
+            return -2;
+        }
+
+        return -1;
+    }
+
+    /**
+     * Checks if there are any illegal collisions.
+     *
+     * @param classRelationship String[]
+     * @param relationshipAmount int[]
+     * @param relModifier Enum[]
+     * @return true if there are illegal collisions, false otherwise
+     */
+    protected boolean hasIllegalCollisions(
+            ChildrenMatches match,
+            String[] classRelationship,
+            int[] relationshipAmount,
+            Enum[] relModifier){
+        int illegalZoneRes= 0;
+        int illegalSegRes = 0;
+        int illegalModelRes = 0;
+        int crossCategoryRes = 0;
+        // Each legal collision check will return the index of the legal case
+        // that was found or -1 for nothing to evaluate. If -2 is returned in
+        // any of these cases that indicates the data provided did not result
+        // in any matches and therefore should be handled appropriately.
+        if(match== null) {
+
+            illegalZoneRes= hasLegalZoneCollisions(
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+
+            illegalSegRes = hasLegalSegmentCollisions(
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+
+            illegalModelRes = hasLegalModelCollisions(
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+
+            crossCategoryRes = checkCrossCategoryCollisions(
+                    null,
+                    null,
+                    null,
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+        }else {
+
+            illegalZoneRes= hasLegalCollisions(
+                    match.zoneMatchCountMap,
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+
+            illegalSegRes = hasLegalCollisions(
+                    match.wallMatchCountMap,
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+
+            illegalModelRes = hasLegalCollisions(
+                    match.entityMatchCountMap,
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+
+            crossCategoryRes = checkCrossCategoryCollisions(
+                    match.zoneMatchCountMap,
+                    match.entityMatchCountMap,
+                    match.wallMatchCountMap,
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+
+        }
+
+        // If cross category check comes back as valid, then we don't care
+        // about anything else. If it doesn't we want to make sure the
+        // straight up individual cases are valid, otherwise we do have
+        // an illegal collision.
+        if (crossCategoryRes > -1) {
+            return false;
+        }
+
+        if(illegalZoneRes == -2 ||
+                illegalSegRes == -2 ||
+                illegalModelRes == -2){
+
+            return true;
+
+        } else if (crossCategoryRes == -2){
+
+            // Cross category results is a special case since a single
+            // relationship could be satisfied and yet this could come
+            // back as -2 indicating no satisfied cross classification
+            // reference is satisfied. Yes, classification and category
+            // are used interchangeably here. If we have satisfied one
+            // of the earlier cases, then we don't have to worry
+            // about the cross category case. That is what we
+            // evaluate here.
+            if(illegalZoneRes >= 0){
+                ;
+            } else if (illegalSegRes >= 0){
+                ;
+            } else if (illegalModelRes >= 0){
+                ;
+            } else {
+                return true;
+            }
+        } else if(match == null) {
+            if(illegalEntities.size() > 0) {
+
+
+                //Immediately check for illegal collision matches
+                return true;
+            }
+        }else {
+            if(match.illegalEntities.size() > 0) {
+
+
+                //Immediately check for illegal collision matches
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+
+    /**
+     * Determines if the segment collisions are all legal. If any are not legal
+     * collisions, the check will return either -2 or -1 depending on the
+     * issue.
+     *
+     * @param classRelationship String[]
+     * @param relationshipAmount int[]
+     * @param relModifier Enum[]
+     * @return index of matching classification, otherwise -1 if not found,
+     * -2 if illegal collision found
+     */
+    protected int hasLegalSegmentCollisions(
+            String[] classRelationship,
+            int[] relationshipAmount,
+            Enum[] relModifier){
+
+        for(int i = 0; i < classRelationship.length; i++){
+
+            // Check for : character, otherwise standard check
+            if(classRelationship[i].contains(":")){
+
+                // For proper analysis we cannot have multiple entries with
+                // the same name in a relClass so clean it
+                HashMap<String, Integer> cleanedClassRelationship =
+                    cleanClassRelationship(classRelationship[i]);
+
+                Object[] keys =
+                    cleanedClassRelationship.keySet().toArray();
+
+                String token;
+
+                boolean matchesFound = true;
+
+                for (int x = 0; x < keys.length; x++) {
+
+                    token = (String) keys[x];
+                    int amt = cleanedClassRelationship.get(token);
+
+                    if (amt == 1) {
+                        amt = relationshipAmount[i];
+                    }
+
+                    if(!legalAssociationNumber(
+                        wallMatchCountMap.get(token),
+                        amt,
+                        (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)relModifier[i])){
+
+                        matchesFound = false;
+                        break;
+                    }
+                }
+
+                if(!matchesFound){
+                    continue;
+                }
+
+                return i;
+
+            } else if(legalAssociationNumber(
+                                wallMatchCountMap.get(classRelationship[i]),
+                                relationshipAmount[i],
+                                (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)relModifier[i])){
+
+                            return i;
+            }
+        }
+
+        if(wallMatchCountMap != null && wallMatchCountMap.size() > 0){
+            return -2;
+        }
+
+        return -1;
+    }
+
+
+    /**
+     * Determines if the zone collisions are all legal. If any are not legal
+     * collisions, the check will return either -2 or -1 depending on the
+     * issue.
+     *
+     * @param classRelationship String[]
+     * @param relationshipAmount int[]
+     * @param relModifier Enum[]
+     * @return index of matching classification, otherwise -1 if nothing to
+     * check, -2 if illegal collision found
+     */
+    protected int hasLegalCollisions(
+            HashMap<String,Integer> countMap,
+            String[] classRelationship,
+            int[] relationshipAmount,
+            Enum[] relModifier){
+
+        for(int i = 0; i < classRelationship.length; i++){
+
+            // Check for : character, otherwise standard check
+            if(classRelationship[i].contains(":")){
+
+                // For proper analysis we cannot have multiple entries with
+                // the same name in a relClass so clean it
+                HashMap<String, Integer> cleanedClassRelationship =
+                    cleanClassRelationship(classRelationship[i]);
+
+                Object[] keys =
+                    cleanedClassRelationship.keySet().toArray();
+
+                String token;
+
+                boolean matchesFound = true;
+
+                for (int x = 0; x < keys.length; x++) {
+
+                    token = (String) keys[x];
+                    int amt = cleanedClassRelationship.get(token);
+
+                    if (amt == 1) {
+                        amt = relationshipAmount[i];
+                    }
+
+
+                    if(!legalAssociationNumber(
+                        countMap.get(token),
+                        amt,
+                        (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)relModifier[i])){
+
+                        matchesFound = false;
+                        break;
+                    }
+                }
+
+                if(!matchesFound){
+                    continue;
+                }
+
+                return i;
+
+            } else if(legalAssociationNumber(
+                        countMap.get(classRelationship[i]),
+                        relationshipAmount[i],
+                        (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)relModifier[i])){
+
+                return i;
+            }
+        }
+
+        if(countMap != null && countMap.size() > 0){
+            return -2;
+        }
+
+        return -1;
+    }
+
+
+    /**
+     * Determines if the model collisions are all legal. If any are not legal
+     * collisions, the check will return either -2 or -1 depending on the
+     * issue.
+     *
+     * @param classRelationship String[]
+     * @param relationshipAmount int[]
+     * @param relModifier Enum[]
+     * @return index of matching classification, otherwise -1 if not found
+     * -2 if illegal collision found
+     */
+    protected int hasLegalModelCollisions(
+            String[] classRelationship,
+            int[] relationshipAmount,
+            Enum[] relModifier){
+
+        for(int i = 0; i < classRelationship.length; i++){
+
+            // Check for : character, otherwise standard check
+            if(classRelationship[i].contains(":")){
+
+                // For proper analysis we cannot have multiple entries with
+                // the same name in a relClass so clean it
+                HashMap<String, Integer> cleanedClassRelationship =
+                    cleanClassRelationship(classRelationship[i]);
+
+                Object[] keys =
+                    cleanedClassRelationship.keySet().toArray();
+
+                String token;
+
+                boolean matchesFound = true;
+
+                for (int x = 0; x < keys.length; x++) {
+
+                    token = (String) keys[x];
+                    int amt = cleanedClassRelationship.get(token);
+
+                    if (amt == 1) {
+                        amt = relationshipAmount[i];
+                    }
+
+                    if(!legalAssociationNumber(
+                        entityMatchCountMap.get(token),
+                        amt,
+                        (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)
+                        relModifier[i])){
+
+                        matchesFound = false;
+                        break;
+                    }
+                }
+
+                if(!matchesFound){
+                    continue;
+                }
+
+                return i;
+
+            } else if(legalAssociationNumber(
+                entityMatchCountMap.get(classRelationship[i]),
+                relationshipAmount[i],
+                (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)
+                relModifier[i])){
+
+                    return i;
+            }
+
+        }
+
+        if(entityMatchCountMap != null && entityMatchCountMap.size() > 0){
+            if (logFailures) {
+                StringBuilder sb = new StringBuilder();
+                for(int i=0; i < classRelationship.length; i++) {
+                    sb.append("   ");
+                    sb.append(classRelationship[i]);
+                    sb.append(" ");
+                    sb.append(relModifier[i]);
+                    sb.append(" ");
+                    sb.append(relationshipAmount[i]);
+                }
+                logFailure("hasLegalModelCollisions1 - Expected a collision with: \n" + sb.toString());
+                printCollisionEntitiesMap();
+                printCollisionEntitiesList();
+            }
+
+            return -2;
+        }
+
+        return -1;
+    }
+
+    /**
+     * Determines if the multiple collisions are all legal. If any are not legal
+     * collisions, the check will return either -2 or -1 depending on the
+     * issue.
+     *
+     * @param classRelationship String[]
+     * @param relationshipAmount int[]
+     * @param relModifier Enum[]
+     * @return index of matching classification, otherwise -1 if not found,
+     * -2 if illegal collision found
+     */
+    protected int checkCrossCategoryCollisions(
+            String[] classRelationship,
+            int[] relationshipAmount,
+            Enum[] relModifier){
+
+        int iterateSize = Math.min(
+                classRelationship.length,
+                Math.min(relationshipAmount.length, relModifier.length));
+
+        boolean containsJoiner = false;
+
+        for(int i = 0; i < iterateSize; i++){
+
+            // Check for : character only
+            if(classRelationship[i].contains(":")){
+
+                containsJoiner = true;
+
+                // For proper analysis we cannot have multiple entries with
+                // the same name in a relClass so clean it
+                HashMap<String, Integer> cleanedClassRelationship =
+                    cleanClassRelationship(classRelationship[i]);
+
+                Object[] keys =
+                    cleanedClassRelationship.keySet().toArray();
+
+                String token;
+
+                boolean matchesFound = true;
+
+                for (int x = 0; x < keys.length; x++) {
+
+                    token = (String) keys[x];
+                    int amt = cleanedClassRelationship.get(token);
+
+                    if (amt == 1) {
+                        amt = relationshipAmount[i];
+                    }
+
+                    if(legalAssociationNumber(
+                        zoneMatchCountMap.get(token),
+                        amt,
+                        (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)relModifier[i])){
+
+                        continue;
+
+                    } else if(legalAssociationNumber(
+                            wallMatchCountMap.get(token),
+                            amt,
+                            (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)relModifier[i])){
+
+                        continue;
+
+                    } else if(legalAssociationNumber(
+                            entityMatchCountMap.get(token),
+                            amt,
+                            (ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES)relModifier[i])){
+
+                        continue;
+
+                    } else {
+                        matchesFound = false;
+                        break;
+                    }
+                }
+
+                if(matchesFound){
+                    return i;
+                }
+            }
+        }
+
+        if(containsJoiner &&
+                ((zoneMatchCountMap != null && zoneMatchCountMap.size() > 0) ||
+                (wallMatchCountMap != null && wallMatchCountMap.size() > 0 ) ||
+                (entityMatchCountMap != null &&
+                        entityMatchCountMap.size() > 0))){
+
+            return -2;
+        }
+
+        return -1;
+    }
+
+    /**
+     * Determines if the multiple collisions are all legal. If any are not legal
+     * collisions, the check will return either -2 or -1 depending on the
+     * issue.
+     *
+     * @param classRelationship String[]
+     * @param relationshipAmount int[]
+     * @param relModifier Enum[]
+     * @return index of matching classification, otherwise -1 if not found,
+     * -2 if illegal collision found
+     */
+    protected int checkCrossCategoryCollisions(
+            HashMap<String,Integer> zoneCountMap,
+            HashMap<String,Integer> entityCountMap,
+            HashMap<String,Integer> wallCountMap,
+            String[] classRelationship,
+            int[] relationshipAmount,
+            Enum[] relModifier){
+
+        if(zoneCountMap != null &&
+                wallCountMap != null &&
+                entityCountMap != null) {
+
+            zoneMatchCountMap = zoneCountMap;
+            wallMatchCountMap = wallCountMap;
+            entityMatchCountMap = entityCountMap;
+        }
+
+        int result =
+            checkCrossCategoryCollisions(
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+
+        return result;
+    }
+
+    /**
+     * Check the requirements on the found relationship for the correct
+     * number and modifier value.
+     *
+     * @param numCollisions Number of collisions found
+     * @param relNumber Number of relationship collisions required
+     * @param relModifier Modifier on relationship collisions required
+     * @return boolean True if legal, false otherwise
+     */
+    protected boolean legalAssociationNumber(
+            Integer numCollisions,
+            int relNumber,
+            ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES relModifier){
+
+        if(numCollisions == null){
+            return false;
+        }
+
+        boolean legalAssociation = false;
+
+        switch(relModifier){
+
+            case LESS_THAN:
+                if(numCollisions < relNumber){
+                    legalAssociation = true;
+                }
+                break;
+
+            case GREATER_THAN:
+                if(numCollisions > relNumber){
+                    legalAssociation = true;
+                }
+                break;
+
+            case LESS_THAN_OR_EQUAL_TO:
+                if(numCollisions <= relNumber){
+                    legalAssociation = true;
+                }
+                break;
+
+            case GREATER_THAN_OR_EQUAL_TO:
+                if(numCollisions >= relNumber){
+                    legalAssociation = true;
+                }
+                break;
+
+            case EQUAL_TO:
+                if(numCollisions == relNumber){
+                    legalAssociation = true;
+                }
+                break;
+
+            case NOT_EQUAL_TO:
+                if(numCollisions != relNumber){
+                    legalAssociation = true;
+                }
+                break;
+
+            case NONE:
+                legalAssociation = true;
+                break;
+        }
+
+        return legalAssociation;
+    }
+
+    /**
+     * Checks the child object bounds against the parent bounds to see
+     * if it is within the bounds of the parent. Returns true if it is
+     * within bounds false otherwise.
+     *
+     * @param childEntity Entity
+     * @param parentEntity Entity
+     * @return True if in bounds, false otherwise
+     */
+    protected boolean performParentBoundsCheck(
+            WorldModel model,
+            Entity childEntity,
+            Entity parentEntity){
+
+        if (parentEntity instanceof BasePositionableEntity &&
+                childEntity instanceof BasePositionableEntity){
+
+            BasePositionableEntity parentBPE =
+                (BasePositionableEntity) parentEntity;
+
+            BasePositionableEntity childBPE =
+                (BasePositionableEntity) childEntity;
+
+            // Get the parent bounds and pos
+            double[] parentPos = new double[3];
+            float[] parentBounds = new float[6];
+
+            parentBPE.getPosition(parentPos);
+            parentBPE.getBounds(parentBounds);
+
+            // Create the 4 parent coordinates
+            double[] topLeft = {
+                    parentPos[0] + parentBounds[0],
+                    parentPos[1] + parentBounds[3],
+                    0.0};
+
+            double[] bottomLeft = {
+                    parentPos[0] + parentBounds[0],
+                    parentPos[1] + parentBounds[2],
+                    0.0};
+
+            double[] bottomRight = {
+                    parentPos[0] + parentBounds[1],
+                    parentPos[1] + parentBounds[2],
+                    0.0};
+
+            double[] topRight = {
+                    parentPos[0] + parentBounds[1],
+                    parentPos[1] + parentBounds[3],
+                    0.0};
+
+            // Get the child bounds and pos
+            double[] pos = new double[3];
+            float[] bounds = new float[6];
+
+            childBPE.getBounds(bounds);
+            childBPE.getPosition(pos);
+            pos = this.getPositionRelativeToZone(model, childBPE);
+            pos[2] = 0.0;
+
+            /*
+             * Create the 4 coordinates to test (top left, bottom left,
+             * bottom right, top right) based on the object position and
+             * bounds.
+             */
+            double[] testCoords = {
+                    pos[0] + bounds[0],
+                    pos[1] + bounds[3],
+                    pos[2],
+
+                    pos[0] + bounds[0],
+                    pos[1] + bounds[2],
+                    pos[2],
+
+                    pos[0] + bounds[1],
+                    pos[1] + bounds[2],
+                    pos[2],
+
+                    pos[0] + bounds[1],
+                    pos[1] + bounds[3],
+                    pos[2]};
+
+            // Perform polygon angle summation to determine if inside or outside wall
+            Vector3d topLeftVector;
+            Vector3d bottomLeftVector;
+            Vector3d bottomRightVector;
+            Vector3d topRightVector;
+
+            for(int i = 0; i < 4; i++){
+
+                topLeftVector = new Vector3d(
+                        topLeft[0] - testCoords[i*3],
+                        topLeft[1] - testCoords[i*3+1],
+                        topLeft[2] - testCoords[i*3+2]);
+
+                bottomLeftVector = new Vector3d(
+                        bottomLeft[0] - testCoords[i*3],
+                        bottomLeft[1] - testCoords[i*3+1],
+                        bottomLeft[2] - testCoords[i*3+2]);
+
+                bottomRightVector = new Vector3d(
+                        bottomRight[0] - testCoords[i*3],
+                        bottomRight[1] - testCoords[i*3+1],
+                        bottomRight[2] - testCoords[i*3+2]);
+
+                topRightVector = new Vector3d(
+                        topRight[0] - testCoords[i*3],
+                        topRight[1] - testCoords[i*3+1],
+                        topRight[2] - testCoords[i*3+2]);
+
+                double radians = 0.0;
+                radians += topLeftVector.angle(bottomLeftVector);
+                radians += bottomLeftVector.angle(bottomRightVector);
+                radians += bottomRightVector.angle(topRightVector);
+                radians += topRightVector.angle(topLeftVector);
+
+                if(Math.abs((2*Math.PI)-radians) > 0.0001){
+                    return false;
+                }
+            }
+
+        }
+
+        return true;
+    }
+
+    /**
+     * Checks the child object against the segment bounds to see
+     * if it is within the bounds of the segment. Returns true if it is
+     * within bounds false otherwise.
+     *
+     * @param model WorldModel
+     * @param childEntity Entity
+     * @param parentEntityID entity ID of childEntity parent
+     * @param leftVertexHeight Float if null, value found will be used
+     * @param rightVertexHeight Float if null, value found will be used
+     * @param newWallLength Double if null, the length of the segment found will be used
+     * @param rotation float[] rotation of the entity
+     * @param command The command being executed
+     * @return True if in bounds, false otherwise
+     */
+    protected boolean performSegmentBoundsCheck(
+            WorldModel model,
+            Entity childEntity,
+            int parentEntityID,
+            Float leftVertexHeight,
+            Float rightVertexHeight,
+            Double newWallLength,
+            float[] rotation,
+            Command command){
+
+        Entity parentEntity = null;
+        int parentID = parentEntityID;
+
+        double[] parentPosSum = new double[] {0.0, 0.0, 0.0};
+
+        while (!(parentEntity instanceof SegmentEntity)){
+
+            parentEntity = model.getEntity(parentID);
+
+            if (parentEntity instanceof SegmentEntity){
+
+                SegmentEntity wallEntity = (SegmentEntity)parentEntity;
+
+                // Get vectors and extract positions
+                VertexEntity startVertexEntity = wallEntity.getStartVertexEntity();
+                VertexEntity endVertexEntity = wallEntity.getEndVertexEntity();
+
+                double[] startVertexPos = new double[3];
+                double[] endVertexPos = new double[3];
+
+                startVertexEntity.getPosition(startVertexPos);
+                endVertexEntity.getPosition(endVertexPos);
+
+                double wallLength = 0;
+                if(newWallLength == null) {
+                Vector3d wallVec = new Vector3d(
+                        endVertexPos[0] - startVertexPos[0],
+                        endVertexPos[1] - startVertexPos[1],
+                        0.0);
+
+                wallLength = wallVec.length();
+                } else {
+                    wallLength = newWallLength;
+                }
+
+                // Create the 4 wall coordinates
+                double topLeftHeight = 0.0;
+                double topRightHeight = 0.0;
+
+                if(leftVertexHeight != null){
+                    topLeftHeight = leftVertexHeight;
+                } else {
+                    topLeftHeight = startVertexEntity.getHeight();
+                }
+
+                if(rightVertexHeight != null){
+                    topRightHeight = rightVertexHeight;
+                } else {
+                    topRightHeight = endVertexEntity.getHeight();
+                }
+
+                double[] topLeft = {
+                        0.0,
+                        topLeftHeight,
+                        0.0};
+
+                double[] bottomLeft = {
+                        0.0,
+                        0.0,
+                        0.0};
+
+                double[] bottomRight = {
+                        wallLength,
+                        0.0,
+                        0.0};
+
+                double[] topRight = {
+                        wallLength,
+                        topRightHeight,
+                        0.0};
+
+                // need to base the check on the final bounds not the current bounds.
+                // default to current scale and position for most cases
+                float[] scale = new float[3];
+                double[] pos = new double[3];
+                if (command instanceof ScaleEntityCommand) {
+                    ((ScaleEntityCommand)command).getNewScale(scale);
+                    ((ScaleEntityCommand)command).getNewPosition(pos);
+                } else {
+                    ((PositionableEntity)childEntity).getScale(scale);
+                    ((PositionableEntity)childEntity).getPosition(pos);
+                }
+
+                // Get the entity bounds
+                float[] bounds = new float[6];
+                calculateBounds((PositionableEntity)childEntity, scale, bounds);
+
+                Boolean spanObject = (Boolean)
+                    RulePropertyAccessor.getRulePropertyValue(
+                            childEntity,
+                            ChefX3DRuleProperties.SPAN_OBJECT_PROP);
+
+                if (spanObject != null && spanObject) {
+                    bounds[0] += SPAN_OVERLAP_THRESHOLD;
+                    bounds[1] -= SPAN_OVERLAP_THRESHOLD;
+                }
+
+                // Get the entity position, flatten to xy plane
+                pos[0] = parentPosSum[0] + pos[0];
+                pos[1] = parentPosSum[1] + pos[1];
+                //pos[2] = parentPosSum[2] + pos[2];
+                pos[2] = 0.0;
+
+                Vector3f topLeftVec = new Vector3f(
+                        (float) bounds[0],
+                        (float) bounds[3],
+                        (float) 0.0);
+                Vector3f bottomLeftVec = new Vector3f(
+                        (float)bounds[0],
+                        (float)bounds[2],
+                        (float)0.0);
+                Vector3f bottomRightVec = new Vector3f(
+                        (float)bounds[1],
+                        (float)bounds[2],
+                        (float)0.0);
+                Vector3f topRightVec = new Vector3f(
+                        (float)bounds[1],
+                        (float)bounds[3],
+                        (float)0.0);
+
+                // Consider rotation in bounds check
+                Matrix4f mat = new Matrix4f();
+                mat.setIdentity();
+                mat.setRotation(new AxisAngle4f(rotation));
+                mat.transform(topLeftVec);
+                mat.transform(bottomLeftVec);
+                mat.transform(bottomRightVec);
+                mat.transform(topRightVec);
+
+                /*
+                 * Create the 4 coordinates to test (top left, bottom left,
+                 * bottom right, top right) based on the object position and
+                 * bounds.
+                 */
+                double[] testCoords = {
+                        pos[0]+topLeftVec.x,
+                        pos[1]+topLeftVec.y,
+                        0.0,
+
+                        pos[0]+bottomLeftVec.x,
+                        pos[1]+bottomLeftVec.y,
+                        0.0,
+
+                        pos[0]+bottomRightVec.x,
+                        pos[1]+bottomRightVec.y,
+                        0.0,
+
+                        pos[0]+topRightVec.x,
+                        pos[1]+topRightVec.y,
+                        0.0};
+
+                // Perform polygon angle summation to determine if inside or outside wall
+                Vector3d topLeftVector;
+                Vector3d bottomLeftVector;
+                Vector3d bottomRightVector;
+                Vector3d topRightVector;
+
+                for(int i = 0; i < 4; i++){
+
+                    topLeftVector = new Vector3d(
+                            topLeft[0] - testCoords[i*3],
+                            topLeft[1] - testCoords[i*3+1],
+                            topLeft[2] - testCoords[i*3+2]);
+
+                    bottomLeftVector = new Vector3d(
+                            bottomLeft[0] - testCoords[i*3],
+                            bottomLeft[1] - testCoords[i*3+1],
+                            bottomLeft[2] - testCoords[i*3+2]);
+
+                    bottomRightVector = new Vector3d(
+                            bottomRight[0] - testCoords[i*3],
+                            bottomRight[1] - testCoords[i*3+1],
+                            bottomRight[2] - testCoords[i*3+2]);
+
+                    topRightVector = new Vector3d(
+                            topRight[0] - testCoords[i*3],
+                            topRight[1] - testCoords[i*3+1],
+                            topRight[2] - testCoords[i*3+2]);
+
+                    double radians = 0.0;
+                    radians += topLeftVector.angle(bottomLeftVector);
+                    radians += bottomLeftVector.angle(bottomRightVector);
+                    radians += bottomRightVector.angle(topRightVector);
+                    radians += topRightVector.angle(topLeftVector);
+                    double result = Math.abs((2*Math.PI)-radians);
+
+                    if(result > ANGLE_CHECK_THRESHOLD){
+                        return false;
+                    }
+                }
+
+            }
+
+            /*
+             * Get parent position to build up transform
+             */
+            if(parentEntity instanceof BasePositionableEntity){
+
+                double[] tempPos = new double[3];
+                ((BasePositionableEntity)parentEntity).getPosition(tempPos);
+
+                parentPosSum[0] = parentPosSum[0] + tempPos[0];
+                parentPosSum[1] = parentPosSum[1] + tempPos[1];
+                parentPosSum[2] = parentPosSum[2] + tempPos[2];
+            }
+
+            /*
+             * Get next parent
+             */
+            if(parentEntity instanceof Entity){
+                parentID = parentEntity.getParentEntityID();
+            } else {
+                break;
+            }
+
+        }
+
+        return true;
+    }
+
+    /**
+     * Get the simple tool matching the name.
+     *
+     * @param name Name of tool to retrieve
+     * @return SimpleTool or null if not found
+     */
+    protected SimpleTool getSimpleToolByName(String id){
+
+        SimpleTool tool =
+            (SimpleTool) catalogManager.findTool(id);
+
+        return tool;
+    }
+
+    /**
+     * Get the first encountered ZoneEntity parent for the given entity.
+     *
+     * @param model WorldModel to look up entities by ID
+     * @param entity Entity to start search with
+     * @return Entity parent of type ZoneEntity or null if not found
+     */
+    protected Entity getParentZoneEntity(WorldModel model, Entity entity){
+
+        if (entity == null) {
+            return null;
+        }
+
+        if (entity instanceof SegmentEntity ||
+                entity instanceof ZoneEntity) {
+
+            return entity;
+        }
+
+        int parentEntityID = entity.getParentEntityID();
+
+        // Check for initial parent ID if this is an add instance that
+        // is not yet in the scene. This is identified by the parent entity ID
+        // being equal to -1. In this case, look for side pocketed parent ID.
+        if (parentEntityID == -1) {
+
+            Integer tmpParentEntityID = (Integer)
+                RulePropertyAccessor.getRulePropertyValue(
+                        entity,
+                        ChefX3DRuleProperties.INITAL_ADD_PARENT);
+
+            if (tmpParentEntityID != null) {
+                parentEntityID = tmpParentEntityID;
+            }
+        }
+
+        Entity parentEntity = model.getEntity(parentEntityID);
+
+        while(!(parentEntity instanceof ZoneEntity)){
+
+            if(parentEntity instanceof Entity){
+                parentEntityID = parentEntity.getParentEntityID();
+
+                // Check for initial parent ID if this is an add instance that
+                // is not yet in the scene. This is identified by the parent entity ID
+                // being equal to -1. In this case, look for side pocketed parent ID.
+                if (parentEntityID == -1) {
+
+                    Integer tmpParentEntityID = (Integer)
+                        RulePropertyAccessor.getRulePropertyValue(
+                                parentEntity,
+                                ChefX3DRuleProperties.INITAL_ADD_PARENT);
+
+                    if (tmpParentEntityID != null) {
+                        parentEntityID = tmpParentEntityID;
+                    }
+                }
+
+                parentEntity = model.getEntity(parentEntityID);
+            } else {
+                return null;
+            }
+        }
+
+        return parentEntity;
+    }
+
+    /**
+     * Determines where the entity is relative to the zone.
+     *
+     * @param model WorldModel to look up entities by ID
+     * @param entity Entity to start search with
+     * @return Entity parent of type ZoneEntity or null if not found
+     */
+    protected int getToZoneCount(WorldModel model, Entity entity){
+
+        int count = 0;
+        if (entity instanceof SegmentEntity ||
+                entity instanceof ZoneEntity) {
+
+            return count;
+        }
+        count++;
+        int parentEntityID = entity.getParentEntityID();
+        Entity parentEntity = model.getEntity(parentEntityID);
+
+        while(!(parentEntity instanceof ZoneEntity)){
+
+            if(parentEntity instanceof Entity){
+                parentEntityID = parentEntity.getParentEntityID();
+                parentEntity = model.getEntity(parentEntityID);
+                count++;
+            } else {
+                return 0;
+            }
+        }
+
+        return count;
+    }
+
+    /**
+     * Prunes the collisionEntities arrayList of all entities
+     *  below the current entity in the tree.
+     *
+     *  Example being, if you have a hang track on a wall and prune from a standard
+     *  Any children of the standards will be removed as they are below the standard
+     * @param model
+     * @param entity
+     */
+    protected void pruneCollisionList(WorldModel model, Entity entity) {
+        int layerNumber = getToZoneCount(model, entity);
+        Object[] entityArray = collisionEntities.toArray();
+
+        for(int i = 0; i < entityArray.length; i++) {
+
+            Entity currentEntity = (Entity)entityArray[i];
+            int currentLayer=  this.getToZoneCount(model, currentEntity);
+            if(currentLayer > layerNumber) {
+                collisionEntities.remove(currentEntity);
+            }
+
+            // skip over any auto-span item
+            Boolean autoSpan =
+                (Boolean) RulePropertyAccessor.getRulePropertyValue(
+                        currentEntity,
+                        ChefX3DRuleProperties.SPAN_OBJECT_PROP);
+            if(autoSpan != null && autoSpan) {
+                collisionEntities.remove(currentEntity);
+            }
+
+        }
+
+    }
+
+    /**
+     * Get all neighbors in the positive x direction from the given entity.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getPositiveXNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        NearestNeighborMeasurement.POS_X,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the positive x direction that match the
+     * product name or classification type of that product.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param name String classification type name
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getPositiveXNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            String name,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        name,
+                        NearestNeighborMeasurement.POS_X,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the negative x direction from the given entity.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getNegativeXNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        NearestNeighborMeasurement.NEG_X,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the negative x direction that match the
+     * product name or classification type of that product.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param name String classification type name
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getNegativeXNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            String name,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        name,
+                        NearestNeighborMeasurement.NEG_X,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the positive y direction from the given entity.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getPositiveYNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        NearestNeighborMeasurement.POS_Y,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the positive y direction that match the
+     * product name or classification type of that product.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param name String classification type name
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getPositiveYNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            String name,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        name,
+                        NearestNeighborMeasurement.POS_Y,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the negative y direction from the given entity.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getNegativeYNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        NearestNeighborMeasurement.NEG_Y,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the negative y direction that match the
+     * product name or classification type of that product.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param name String classification type name
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getNegativeYNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            String name,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        name,
+                        NearestNeighborMeasurement.NEG_Y,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the positive z direction from the given entity.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getPositiveZNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        NearestNeighborMeasurement.POS_Z,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the positive z direction that match the
+     * product name or classification type of that product.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param name String classification type name
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getPositiveZNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            String name,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        name,
+                        NearestNeighborMeasurement.POS_Z,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the negative z direction from the given entity.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getNegativeZNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        NearestNeighborMeasurement.NEG_Z,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the negative z direction that match the
+     * product name or classification type of that product.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param name String classification type name
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getNegativeZNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            String name,
+            float[] boundsAdj){
+
+        return(
+                getNeighbors(
+                        model,
+                        evalEntity,
+                        name,
+                        NearestNeighborMeasurement.NEG_Z,
+                        boundsAdj));
+    }
+
+    /**
+     * Get all neighbors in the specified direction from the given entity.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param direction The direction to check
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            int direction,
+            float[] boundsAdj){
+
+        Entity zoneEntity = getParentZoneEntity(
+                model,
+                evalEntity);
+
+        // If the zone entity found if not null, and parentEntityID is defined
+        // immediately do the nearest neighbor check.
+        //
+        // Otherwise, if zone entity is found, see if the parentEntityID was
+        // side pocketed. If so, temporarily set the parentEntityID and do the
+        // nearest neighbor check.
+        //
+        // Otherwise, if zone entity cannot be found default to
+        // using the active zone entity and check to see if the parentEntityID
+        // was side pocketed.
+        if (zoneEntity != null &&
+                evalEntity.getParentEntityID() != -1) {
+
+            return nearestNeighbor.nearestNeighbors(
+                    model,
+                    zoneEntity,
+                    evalEntity,
+                    direction,
+                    boundsAdj);
+
+        } else if (zoneEntity != null) {
+
+            // Attempt to temporarily fake the intended parenting
+            int originalParentID = evalEntity.getParentEntityID();
+
+            Integer currentParent = (Integer)
+                RulePropertyAccessor.getRulePropertyValue(
+                        evalEntity,
+                        ChefX3DRuleProperties.INITAL_ADD_PARENT);
+
+            if (currentParent == null) {
+                return null;
+            }
+
+            evalEntity.setParentEntityID(currentParent);
+
+            ArrayList<Entity> results =
+                nearestNeighbor.nearestNeighbors(
+                    model,
+                    zoneEntity,
+                    evalEntity,
+                    direction,
+                    boundsAdj);
+
+            evalEntity.setParentEntityID(originalParentID);
+
+            return results;
+
+        } else {
+
+            int activeZoneID =
+                view.getActiveLocationEntity().getActiveZoneID();
+
+            zoneEntity = model.getEntity(activeZoneID);
+
+            if (zoneEntity == null) {
+
+                return null;
+
+            } else {
+
+                // Attempt to temporarily fake the intended parenting
+                int originalParentID = evalEntity.getParentEntityID();
+
+                Integer currentParent = (Integer)
+                    RulePropertyAccessor.getRulePropertyValue(
+                            evalEntity,
+                            ChefX3DRuleProperties.INITAL_ADD_PARENT);
+
+                if (currentParent == null) {
+                    return null;
+                }
+
+                evalEntity.setParentEntityID(currentParent);
+
+                ArrayList<Entity> results =
+                    nearestNeighbor.nearestNeighbors(
+                        model,
+                        zoneEntity,
+                        evalEntity,
+                        direction,
+                        boundsAdj);
+
+                evalEntity.setParentEntityID(originalParentID);
+
+                return results;
+            }
+        }
+    }
+
+    /**
+     * Get all neighbors in the specified direction that match the
+     * product name or classification type of that product.
+     *
+     * @param model WorldModel to look up other entities
+     * @param evalEntity PositionableEntity to perform neighbor check on
+     * @param name String classification type name
+     * @param direction The direction to check
+     * @param boundsAdj x,y,z axis additional bounds values to consider,
+     * can be null if no adjustment to the entity bounds is needed
+     * @return ArrayList<Entity> of neighbors or null if unable to check
+     */
+    protected ArrayList<Entity> getNeighbors(
+            WorldModel model,
+            PositionableEntity evalEntity,
+            String name,
+            int direction,
+            float[] boundsAdj){
+
+        ArrayList<Entity> neighbors = getNeighbors(
+                model,
+                evalEntity,
+                direction,
+                boundsAdj);
+
+        if (neighbors != null) {
+
+            String[] classifications = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        evalEntity,
+                        ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+            for(int i = neighbors.size()-1; i >= 0; i--){
+
+                String tmpName = neighbors.get(i).getName();
+
+                if(!tmpName.equals(name)){
+
+                    String[] tmpClass = (String[])
+                        RulePropertyAccessor.getRulePropertyValue(
+                                neighbors.get(i),
+                                ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+                    if(tmpClass != null){
+
+                        boolean classMatchFound = false;
+
+                        for(int w = 0; w < classifications.length; w++){
+
+                            for(int x = 0; x < tmpClass.length; x++){
+
+                                if(tmpClass[x].equals(classifications[w])){
+
+                                    classMatchFound = true;
+                                    break;
+                                }
+                            }
+
+                            if(classMatchFound){
+                                break;
+                            }
+                        }
+
+                        if(classMatchFound){
+                            continue;
+                        }
+                    }
+
+                    neighbors.remove(i);
+                }
+            }
+        }
+        return neighbors;
+    }
+
+    /**
+     * Get the position of an entity relative to the zone.
+     *
+     * @author Eric Fickenscher
+     * @param model reference to the WorldModel
+     * @param entity Entity of which we want to know the relative position
+     * @return double[] xyz pos relative to relativeEntity, or null if it
+     * cannot be read
+     */
+    protected double[] getPositionRelativeToZone(
+            WorldModel model,
+            Entity entity){
+
+        return getRelativePosition(
+            model,
+            entity,
+            TransformUtils.findZoneEntity(model, entity),
+            false);
+    }
+
+    /**
+     * Get position relative to the active zone. Do so by stripping the end
+     * position, entity and parent data from the command.
+     *
+     * @param model WorldModel to reference
+     * @param command Command to pull data from
+     * @return Position relative to zone, or null if command cannot be read
+     */
+    protected double[] getPositionRelativeToZone(
+            WorldModel model,
+            Command command) {
+
+        PositionableEntity entity = null;
+        double[] endPosition = new double[3];
+        double[] currentPosition = new double[3];
+        int endParentEntityID = -1;
+        int currentParentEntityID = -1;
+
+        double[] results;
+
+        if (command instanceof AddEntityChildCommand) {
+
+            entity = (PositionableEntity)
+                ((AddEntityChildCommand)command).getEntity();
+            entity.getPosition(endPosition);
+            entity.getPosition(currentPosition);
+            endParentEntityID =
+                ((AddEntityChildCommand)
+                        command).getParentEntity().getEntityID();
+            currentParentEntityID = entity.getParentEntityID();
+
+        } else if (command instanceof AddEntityChildTransientCommand) {
+
+            entity = (PositionableEntity)
+                ((AddEntityChildTransientCommand)command).getEntity();
+            entity.getPosition(endPosition);
+            entity.getPosition(currentPosition);
+            endParentEntityID = entity.getParentEntityID();
+            currentParentEntityID = entity.getParentEntityID();
+
+        } else if (command instanceof AddEntityCommand) {
+
+            entity = (PositionableEntity)
+                ((AddEntityChildTransientCommand)command).getEntity();
+            entity.getPosition(endPosition);
+            entity.getPosition(currentPosition);
+            endParentEntityID = entity.getParentEntityID();
+            currentParentEntityID = entity.getParentEntityID();
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            entity = (PositionableEntity)
+                ((MoveEntityTransientCommand)command).getEntity();
+            ((MoveEntityTransientCommand)command).getPosition(endPosition);
+            entity.getPosition(currentPosition);
+            endParentEntityID = entity.getParentEntityID();
+            currentParentEntityID = entity.getParentEntityID();
+
+        } else if (command instanceof MoveEntityCommand) {
+
+            entity = (PositionableEntity)
+                ((MoveEntityCommand)command).getEntity();
+            ((MoveEntityCommand)command).getEndPosition(endPosition);
+            entity.getPosition(currentPosition);
+            endParentEntityID = entity.getParentEntityID();
+            currentParentEntityID = entity.getParentEntityID();
+
+        } else if (command instanceof TransitionEntityChildCommand) {
+
+            entity = (PositionableEntity)
+                ((TransitionEntityChildCommand)command).getEntity();
+            ((TransitionEntityChildCommand)
+                    command).getEndPosition(endPosition);
+            entity.getPosition(currentPosition);
+            endParentEntityID =
+                ((TransitionEntityChildCommand)
+                        command).getEndParentEntity().getEntityID();
+            currentParentEntityID = entity.getParentEntityID();
+
+        } else if (command instanceof ScaleEntityCommand) {
+
+            entity = (PositionableEntity)
+                ((ScaleEntityCommand)command).getEntity();
+            ((ScaleEntityCommand)command).getNewPosition(endPosition);
+            entity.getPosition(currentPosition);
+            endParentEntityID = entity.getParentEntityID();
+            currentParentEntityID = entity.getParentEntityID();
+
+        } else if (command instanceof ScaleEntityTransientCommand) {
+
+            entity = (PositionableEntity)
+                ((ScaleEntityTransientCommand)command).getEntity();
+            ((ScaleEntityTransientCommand)command).getPosition(endPosition);
+            entity.getPosition(currentPosition);
+            endParentEntityID = entity.getParentEntityID();
+            currentParentEntityID = entity.getParentEntityID();
+
+        } else {
+
+            return null;
+        }
+
+        // Default return value if could not determine entity from
+        // accepted commands
+        if (entity == null) {
+            return null;
+        }
+
+        // Set the values for our testing purposes
+        entity.setPosition(endPosition, false);
+        entity.setParentEntityID(endParentEntityID);
+
+        // Perform test
+        results = getRelativePosition(
+                model,
+                entity,
+                TransformUtils.findZoneEntity(model, entity),
+                false);
+
+        // Set the values back post testing
+        entity.setPosition(currentPosition, false);
+        entity.setParentEntityID(currentParentEntityID);
+
+        return results;
+    }
+
+
+    /**
+     *
+     * Get the position of an entity relative to the relativeEntity. If the
+     * relativeEntity is not found, the position returned will be relative
+     * to the active zone.
+     *
+     * @param model WorldModel
+     * @param startEntity Starting entity to build up position data from
+     * @param relativeEntity Entity to stop building position data at
+     * @param useStartPosition Set true if position should be derived from
+     * start positions
+     * @return double[] xyz pos relative to relativeEntity, or null if unable
+     * to calculate(any entity not Positionable or not parented to a Zone)
+     */
+    protected double[] getRelativePosition(
+            WorldModel model,
+            Entity startEntity,
+            Entity relativeEntity,
+            boolean useStartPosition){
+
+        if (startEntity == null ||
+                relativeEntity == null) {
+            return null;
+        }
+
+        double[] posTotal = new double[3];
+        double[] tmpPos = new double[3];
+
+        int parentEntityID = startEntity.getParentEntityID();
+
+        // Check for initial parent ID if this is an add instance that
+        // is not yet in the scene. This is identified by the parent entity ID
+        // being equal to -1. In this case, look for side pocketed parent ID.
+        if (parentEntityID == -1) {
+
+            Integer tmpParentEntityID = (Integer)
+                RulePropertyAccessor.getRulePropertyValue(
+                        startEntity,
+                        ChefX3DRuleProperties.INITAL_ADD_PARENT);
+
+            if (tmpParentEntityID != null) {
+                parentEntityID = tmpParentEntityID;
+            }
+        }
+
+        Entity parentEntity = model.getEntity(parentEntityID);
+
+        if (startEntity instanceof ZoneEntity) {
+            if (useStartPosition){
+                ((PositionableEntity)startEntity).getStartingPosition(posTotal);
+            } else {
+                ((PositionableEntity)startEntity).getPosition(posTotal);
+            }
+            return posTotal;
+        } else if(!(parentEntity instanceof PositionableEntity)){
+            return posTotal;
+        }
+
+        if (useStartPosition){
+            ((PositionableEntity)startEntity).getStartingPosition(posTotal);
+        } else {
+            ((PositionableEntity)startEntity).getPosition(posTotal);
+        }
+
+        while(!(parentEntity instanceof ZoneEntity)){
+
+            // If we match the relative entity we have searched far back
+            // enough.
+            if (parentEntity.getEntityID() ==
+                relativeEntity.getEntityID()) {
+                break;
+            }
+
+            if(parentEntity instanceof PositionableEntity){
+
+                if(useStartPosition){
+                    ((PositionableEntity)parentEntity).getStartingPosition(
+                            tmpPos);
+                } else {
+                    ((PositionableEntity)parentEntity).getPosition(tmpPos);
+                }
+
+                posTotal[0] = posTotal[0] + tmpPos[0];
+                posTotal[1] = posTotal[1] + tmpPos[1];
+                posTotal[2] = posTotal[2] + tmpPos[2];
+
+                parentEntityID = parentEntity.getParentEntityID();
+
+                // Check for initial parent ID if this is an add instance that
+                // is not yet in the scene. This is identified by the parent entity ID
+                // being equal to -1. In this case, look for side pocketed parent ID.
+                if (parentEntityID == -1) {
+
+                    Integer tmpParentEntityID = (Integer)
+                        RulePropertyAccessor.getRulePropertyValue(
+                                startEntity,
+                                ChefX3DRuleProperties.INITAL_ADD_PARENT);
+
+                    if (tmpParentEntityID != null) {
+                        parentEntityID = tmpParentEntityID;
+                    }
+                }
+
+                parentEntity = model.getEntity(parentEntityID);
+
+            } else {
+
+                return null;
+            }
+        }
+
+        return posTotal;
+    }
+
+    /**
+     * Produces double[] xyz values of axis specific distance between
+     * firstEntity and secondEntity. Calculated as firstEntity - secondEntity.
+     *
+     * @param model WorldModel
+     * @param firstEntity First Entity
+     * @param secondEntity Second Entity
+     * @return double[] xyz order distance values, or null if cannot compute
+     */
+    protected double[] getDistanceBetweenEntities(WorldModel model, Entity firstEntity, Entity secondEntity){
+
+        Entity firstEntityZoneParent = getParentZoneEntity(model, firstEntity);
+        Entity secondEntityZoneParent = getParentZoneEntity(model, secondEntity);
+
+        // If the entity zone parent is null, set it to the active zone.
+        // This is a safe thing to do considering the parent of any entity with
+        // a null parent can expect to be added to the current active zone.
+        if (firstEntityZoneParent == null) {
+
+            int activeZoneID =
+                view.getActiveLocationEntity().getActiveZoneID();
+
+            firstEntityZoneParent = model.getEntity(activeZoneID);
+        }
+
+        if (secondEntityZoneParent == null) {
+
+            int activeZoneID =
+                view.getActiveLocationEntity().getActiveZoneID();
+
+            secondEntityZoneParent = model.getEntity(activeZoneID);
+        }
+
+        /*
+         * If these do not share the same zone entity, we cannot compute
+         */
+        if(firstEntityZoneParent.getEntityID() !=
+            secondEntityZoneParent.getEntityID()){
+
+            return null;
+        }
+
+        double[] firstRelPos =
+            getRelativePosition(model, firstEntity, firstEntityZoneParent, false);
+
+        double[] secondRelPos =
+            getRelativePosition(model, secondEntity, secondEntityZoneParent, false);
+
+        double[] distanceVals = new double[3];
+
+        distanceVals[0] = firstRelPos[0] - secondRelPos[0];
+        distanceVals[1] = firstRelPos[1] - secondRelPos[1];
+        distanceVals[2] = firstRelPos[2] - secondRelPos[2];
+
+        return distanceVals;
+    }
+
+    /**
+     * Add a command to the newlyIssuedCommands ArrayList
+     *
+     * @param command Command to add
+     */
+    protected void addNewlyIssuedCommand(Command command){
+        newlyIssuedCommands.add(command);
+        newlyIssuedCommandHistory.add(command);
+    }
+
+    /**
+     * Remove a command from the newlyIssuedCommands ArrayList
+     *
+     * @param command Command to remove
+     */
+    protected void removeNewlyIssuedCommand(Command command){
+        newlyIssuedCommands.remove(command);
+        newlyIssuedCommandHistory.remove(command);
+    }
+
+    /**
+     * Add a list of commands to the newlyIssuedCommands ArrayLsit
+     * @param cmdList ArrayList<Command> of commands
+     */
+    protected void addNewlyIssuedCommand(ArrayList<Command> cmdList){
+
+        newlyIssuedCommands.addAll(cmdList);
+        newlyIssuedCommandHistory.addAll(cmdList);
+    }
+
+    /**
+     * Get the list of entities that are set to be removed with the next
+     * command execution.
+     *
+     * @return ArrayList<Entity> of entities set to be removed
+     */
+    protected ArrayList<Entity> getNewlyIssuedRemoveCommandEntities() {
+
+        ArrayList<Entity> removeEntityList =
+            new ArrayList<Entity>();
+
+        for (int i = 0; i < newlyIssuedCommands.size(); i++) {
+
+            Command cmd = newlyIssuedCommands.get(i);
+
+            if (cmd instanceof RemoveEntityChildCommand) {
+
+                removeEntityList.add(
+                        ((RemoveEntityChildCommand) cmd).getEntity());
+            } else if (cmd instanceof RemoveEntityChildTransientCommand) {
+
+                removeEntityList.add(
+                        ((RemoveEntityChildTransientCommand) cmd).getEntity());
+            }
+        }
+
+        return removeEntityList;
+    }
+
+    /**
+     * Sort a list of entities in descending position order.
+     *
+     * @param originalList List of entities to sort
+     * @param axis Axis to do comparisons along
+     * @return List of entities or null if there was a problem
+     */
+    protected ArrayList<Entity> sortDescendingPosValueOrder(
+            ArrayList<Entity> originalList,
+            ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS axis){
+
+        // Performs insertion sort algorithm to build up the sorted list to
+        // return.
+        ArrayList<Entity> newList = new ArrayList<Entity>();
+
+        double[] curPos = new double[3];
+        double[] sortedEntityPos = new double[3];
+        PositionableEntity curEntity = null;
+        PositionableEntity sortedEntity = null;
+
+        for(int i = 0; i < originalList.size(); i++) {
+
+            // Extract the next entity to sort and get its position
+            try {
+
+                curEntity = (PositionableEntity)originalList.get(i);
+                curEntity.getPosition(curPos);
+
+            } catch(ClassCastException cce) {
+                errorReporter.errorReport(
+                        CLASS_CAST_EXCEPTION_MSG,
+                        cce);
+
+                return null;
+            }
+
+            // Perform insertion operation at correct level
+            int index = 0;
+
+            do {
+
+                // Handle belongs at bottom case
+                if(index >= newList.size()) {
+
+                    newList.add(curEntity);
+                    break;
+
+                } else {
+
+                    // Compare check
+                    sortedEntity = (PositionableEntity) newList.get(index);
+                    sortedEntity.getPosition(sortedEntityPos);
+                    boolean insertBefore = false;
+
+                    switch(axis) {
+
+                        case XAXIS:
+                            if(curPos[0] > sortedEntityPos[0]) {
+                                insertBefore = true;
+                            }
+                            break;
+
+                        case YAXIS:
+                            if(curPos[1] > sortedEntityPos[1]) {
+                                insertBefore = true;
+                            }
+                            break;
+
+                        case ZAXIS:
+                            if(curPos[2] > sortedEntityPos[2]) {
+                                insertBefore = true;
+                            }
+                            break;
+                    }
+
+                    if(insertBefore) {
+
+                        newList.add(index, curEntity);
+                        break;
+                    }
+                }
+
+                index++;
+
+            } while (index < newList.size());
+
+            if(index >= newList.size()){
+
+                newList.add(curEntity);
+            }
+        }
+
+
+        return newList;
+    }
+
+    /**
+     * Sort a list of entities in descending position order relative the zone
+     *
+     * @param originalList List of entities to sort
+     * @param axis Axis to do comparisons along
+     * @return List of entities or null if there was a problem
+     */
+    protected ArrayList<Entity> sortDescendingRelativePosValueOrder(
+            WorldModel model,
+            ArrayList<Entity> originalList,
+            ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS axis){
+
+        // Performs insertion sort algorithm to build up the sorted list to
+        // return.
+        ArrayList<Entity> newList = new ArrayList<Entity>();
+
+        double[] curPos = new double[3];
+        double[] sortedEntityPos = new double[3];
+        PositionableEntity curEntity = null;
+        PositionableEntity sortedEntity = null;
+
+        for(int i = 0; i < originalList.size(); i++) {
+
+            // Extract the next entity to sort and get its position
+            try {
+
+                curEntity = (PositionableEntity)originalList.get(i);
+                curPos = getPositionRelativeToZone(model, curEntity);
+
+            } catch(ClassCastException cce) {
+                errorReporter.errorReport(
+                        CLASS_CAST_EXCEPTION_MSG,
+                        cce);
+
+                return null;
+            }
+
+            // Perform insertion operation at correct level
+            int index = 0;
+
+            do {
+
+                // Handle belongs at bottom case
+                if(index >= newList.size()) {
+
+                    newList.add(curEntity);
+                    break;
+
+                } else {
+
+                    // Compare check
+                    sortedEntity = (PositionableEntity) newList.get(index);
+                    sortedEntityPos = getPositionRelativeToZone(model, sortedEntity);
+
+                    boolean insertBefore = false;
+
+                    switch(axis) {
+
+                        case XAXIS:
+                            if(curPos[0] > sortedEntityPos[0]) {
+                                insertBefore = true;
+                            }
+                            break;
+
+                        case YAXIS:
+                            if(curPos[1] > sortedEntityPos[1]) {
+                                insertBefore = true;
+                            }
+                            break;
+
+                        case ZAXIS:
+                            if(curPos[2] > sortedEntityPos[2]) {
+                                insertBefore = true;
+                            }
+                            break;
+                    }
+
+                    if(insertBefore) {
+
+                        newList.add(index, curEntity);
+                        break;
+                    }
+                }
+
+                index++;
+
+            } while (index < newList.size());
+
+            if(index >= newList.size()){
+
+                newList.add(curEntity);
+            }
+        }
+
+
+        return newList;
+    }
+
+
+    /**
+     * Check a list of collisions for dependency on the entityIdsToIgnore list.
+     * Will check a list of entities to see if any require a specific collision
+     * that does not exist, either because it's no longer where it was expected
+     * in the scene, or it has been removed in the entityIdsToIgnore list. Can
+     * optionally set the ignoreAutoAdded flag to ignore skip Entities in the
+     * collisionList that are auto added entities.
+     *
+     * Method automatically removes all segment and zone entities from collisionList.
+     *
+     * @param model WorldModel to reference
+     * @param modelCollisionList List of entities to check as dependents
+     * @param entityIdsToIgnore Entity id's to ignore
+     * @param ignoreAutoAdded True to ignore auto added products in check
+     * @return False if there are no dependencies, true otherwise
+     */
+    protected boolean hasDependantProductAttached(
+            WorldModel model,
+            ArrayList<Entity> collisionList,
+            int[] entityIdsToIgnore,
+            boolean ignoreAutoAdded){
+
+        // Copy the list over so that future collision checks
+        // don't accidently overwrite the original data.
+        ArrayList<Entity> modelCollisionList =
+            new ArrayList<Entity>(collisionList);
+
+        // Remove any segment and zone entities from list. Only operate on
+        // type model
+        for(int i = (modelCollisionList.size()-1); i >= 0; i--){
+
+            if (modelCollisionList.get(i).getType() != Entity.TYPE_MODEL) {
+                modelCollisionList.remove(i);
+            }
+        }
+
+        // See if removing the entity from collision set of all collision
+        // entities discovered would cause them to have illegal collisions.
+        // If it would, then it has dependent products attached.
+
+        for(int i = 0; i < modelCollisionList.size(); i++){
+
+            int transID = model.issueTransactionID();
+            Entity tmpEntity = modelCollisionList.get(i);
+            double[] pos = new double[3];
+
+            // If flagged, ignore auto added products
+            if(ignoreAutoAdded){
+
+                Boolean isAutoAddProduct = (Boolean)
+                    RulePropertyAccessor.getRulePropertyValue(
+                            tmpEntity,
+                            ChefX3DRuleProperties.IS_AUTO_ADD_PRODUCT);
+
+                if(isAutoAddProduct != null && isAutoAddProduct == true){
+                    continue;
+                }
+            }
+
+            // Can't operate on product without accessible position data
+            if(!(tmpEntity instanceof PositionableEntity)){
+
+                return true;
+            }
+
+            ((PositionableEntity)tmpEntity).getPosition(pos);
+
+            MoveEntityCommand tmpMvCmd =
+                new MoveEntityCommand(
+                        model,
+                        transID,
+                        tmpEntity.getEntityID(),
+                        pos,
+                        pos);
+
+            // Always do these checks without the extended bounds imposed by
+            // collision position requirements.
+            Boolean colPosReq = (Boolean)
+                RulePropertyAccessor.getRulePropertyValue(
+                    tmpEntity,
+                    ChefX3DRuleProperties.COLLISION_POSITION_REQUIREMENTS);
+
+            tmpEntity.setProperty(
+                    Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.COLLISION_POSITION_REQUIREMENTS,
+                    false,
+                    false);
+
+            performCollisionCheck(tmpMvCmd);
+
+            // Set collision position requirement value back
+            tmpEntity.setProperty(
+                    Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.COLLISION_POSITION_REQUIREMENTS,
+                    colPosReq,
+                    false);
+
+
+            performCollisionAnalysisHelper(
+                    tmpEntity,
+                    null,
+                    false,
+                    entityIdsToIgnore,
+                    true);
+
+            // If there are illegal collisions without the specified entity id
+            // considered in the collision list then we have a dependancy we
+            // must respect, so return true.
+            if(hasIllegalCollisionHelper(tmpEntity)){
+
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Check to see if the entity should not be moved because of collisions
+     * that are dependent on it.
+     *
+     * @param model WorldModel to reference
+     * @param entity Entity to check for collision dependencies on
+     * @return True if other entities are dependent on it, false otherwise
+     */
+    protected boolean isDependantFixedEntity(
+            WorldModel model,
+            PositionableEntity entity){
+
+        int transID = model.issueTransactionID();
+
+        double[] pos = new double[3];
+
+        entity.getPosition(pos);
+
+        MoveEntityCommand mvCmd =
+            new MoveEntityCommand(
+                    model,
+                    transID,
+                    entity.getEntityID(),
+                    pos,
+                    pos);
+
+        performCollisionCheck(mvCmd);
+
+        ArrayList<Entity> dependentCheckSet =
+            new ArrayList<Entity>(collisionEntities);
+
+        // Remove parent
+        for (int i = 0; i < dependentCheckSet.size(); i++) {
+
+            if (dependentCheckSet.get(i).getEntityID() ==
+                entity.getParentEntityID()) {
+
+                dependentCheckSet.remove(i);
+                break;
+            }
+        }
+
+        boolean result =
+            hasDependantProductAttached(
+                    model,
+                    dependentCheckSet,
+                    new int[] {entity.getEntityID()},
+                    false);
+
+        return result;
+    }
+
+    /**
+     * Print out the contents of the collision entities map.
+     */
+    protected void printCollisionEntitiesMap() {
+
+        if (collisionEntitiesMap == null) {
+            System.out.println("CollisionEntities Map is null");
+            return;
+        }
+
+        //------------------------------------------------------
+        // Debug section to print out contents of collision
+        // LIKELY WANT TO KEEP THIS AROUND!!
+        //------------------------------------------------------
+
+        Object[] keys = collisionEntitiesMap.keySet().toArray();
+        System.out.println("*********************************");
+        for (int i = 0; i < keys.length; i++) {
+
+            Entity entityKey = (Entity) keys[i];
+            ArrayList<Entity> collisions = collisionEntitiesMap.get(entityKey);
+
+            System.out.println(" Entity: "+entityKey.getName()+
+                    " ["+entityKey.getEntityID()+"] "+
+                    " is colliding with ...");
+
+            for (int j = 0; j < collisions.size(); j++) {
+                System.out.println("  "+j+") "+collisions.get(j).getName());
+            }
+        }
+    }
+
+    /**
+     * Print out the contents of the collision list.
+     */
+    protected void printCollisionEntitiesList() {
+        if (collisionEntities == null) {
+            System.out.println("CollisionEntities is null");
+            return;
+        }
+
+        //------------------------------------------------------
+        // Debug section to print out contents of collision
+        // LIKELY WANT TO KEEP THIS AROUND!!
+        //------------------------------------------------------
+
+        System.out.println("*********************************");
+
+        for (int i = 0; i < collisionEntities.size(); i++) {
+
+            Entity colEntity = collisionEntities.get(i);
+
+            System.out.println(" Collision found with: "+colEntity.getName()+
+                    " ["+colEntity.getEntityID()+"]");
+        }
+    }
+
+    /**
+     * Checks if scale change is an increase in the overall size. NOTE: will
+     * return null if the values are all equal!
+     *
+     * @param newPos
+     * @param startPos
+     * @param axis
+     * @return
+     */
+    protected Boolean isScaleInPositiveDirection(
+            double[] newPos,
+            double[] startPos,
+            TARGET_ADJUSTMENT_AXIS axis) {
+
+        // Determine the scale edge being scaled and the direction.
+        // To do this we need to know if the scale is increasing or decreasing
+        // and the resulting direction of the scale offset.
+        // Here are the possible combinations:
+        //
+        // 1) isIncreasingScale (true) & isPositiveDirection (true)
+        // = pos edge scale increase
+        //
+        // 2) isIncreasingScale (true) & isPositiveDirection (false)
+        // = neg edge scale increase
+        //
+        // 3) isIncreasingScale (false) & ositiveDirection (true)
+        // = pos edge scale decrease
+        //
+        // 4) isIncreasingScale (false) & isPositiveDirection (false)
+        // = neg edge scale decrease
+        //
+        // Also storing the fixed entity correction which is the offset that
+        // will be applied to all fixed children to keep them in position in
+        // world space.
+
+        boolean isPositiveDirection = false;
+
+        switch(axis){
+
+            case XAXIS:
+
+                // Special case handling where we cannot determine scale edge
+                // just return an empty command list.
+                if (newPos[0] == startPos[0]) {
+
+                    return null;
+                }
+
+                if (newPos[0] > startPos[0]) {
+                    isPositiveDirection = true;
+                } else {
+                    isPositiveDirection = false;
+                }
+
+                break;
+
+            case YAXIS:
+
+                // Special case handling where we cannot determine scale edge
+                // just return an empty command list.
+                if (newPos[1] == startPos[1]) {
+
+                    return null;
+                }
+
+                if (newPos[1] > startPos[1]) {
+                    isPositiveDirection = true;
+                } else {
+                    isPositiveDirection = false;
+                }
+
+                break;
+
+            case ZAXIS:
+
+                // Special case handling where we cannot determine scale edge
+                // just return an empty command list.
+                if (newPos[2] == startPos[2]) {
+
+                    return null;
+                }
+
+                if (newPos[2] > startPos[2]) {
+                    isPositiveDirection = true;
+                } else {
+                    isPositiveDirection = false;
+                }
+
+                break;
+
+            default:
+                return null;
+        }
+
+        return isPositiveDirection;
+    }
+
+    /**
+     * Checks if scale change is an increase in the overall size. NOTE: will
+     * return null if the values are all equal!
+     *
+     * @param newScale New scale
+     * @param startScale Starting scale
+     * @param axis Axis to perform adjustment along
+     * @return True if scale is increasing, false if decreasing, null otherwise
+     */
+    protected Boolean isScaleIncreasing(
+            float[] newScale,
+            float[] startScale,
+            TARGET_ADJUSTMENT_AXIS axis) {
+
+        // Determine the scale edge being scaled and the direction.
+        // To do this we need to know if the scale is increasing or decreasing
+        // and the resulting direction of the scale offset.
+        // Here are the possible combinations:
+        //
+        // 1) isIncreasingScale (true) & isPositiveDirection (true)
+        // = pos edge scale increase
+        //
+        // 2) isIncreasingScale (true) & isPositiveDirection (false)
+        // = neg edge scale increase
+        //
+        // 3) isIncreasingScale (false) & ositiveDirection (true)
+        // = pos edge scale decrease
+        //
+        // 4) isIncreasingScale (false) & isPositiveDirection (false)
+        // = neg edge scale decrease
+        //
+        // Also storing the fixed entity correction which is the offset that
+        // will be applied to all fixed children to keep them in position in
+        // world space.
+
+        boolean isIncreasingScale = false;
+
+        switch(axis){
+
+            case XAXIS:
+
+                // Special case handling where we cannot determine scale edge
+                // just return an empty command list.
+                if (newScale[0] == startScale[0]) {
+
+                    return null;
+                }
+
+                if (newScale[0] > startScale[0]) {
+                    isIncreasingScale = true;
+                } else {
+                    isIncreasingScale = false;
+                }
+
+                break;
+
+            case YAXIS:
+
+                // Special case handling where we cannot determine scale edge
+                // just return an empty command list.
+                if (newScale[1] == startScale[1]) {
+
+                    return null;
+                }
+
+                if (newScale[1] > startScale[1]) {
+                    isIncreasingScale = true;
+                } else {
+                    isIncreasingScale = false;
+                }
+
+                break;
+
+            case ZAXIS:
+
+                // Special case handling where we cannot determine scale edge
+                // just return an empty command list.
+                if (newScale[2] == startScale[2]) {
+
+                    return null;
+                }
+
+                if (newScale[2] > startScale[2]) {
+                    isIncreasingScale = true;
+                } else {
+                    isIncreasingScale = false;
+                }
+
+                break;
+
+            default:
+                return null;
+        }
+
+        return isIncreasingScale;
+    }
+
+    /**
+     * Add the command's entity as a surrogate to the collision checker.
+     *
+     * @param command Command to process and turn into a surrogate
+     */
+    protected void addSurrogate(Command command) {
+
+        DefaultSurrogateEntityWrapper surrogate =
+            GenerateSurrogate.getInstance().createSurrogate(command);
+
+        if (surrogate != null) {
+            collisionChecker.addSurrogate(surrogate);
+        }
+    }
+
+    /**
+     * Remove the entity surrogate.
+     *
+     * @param entity Entity to have it surrogate removed
+     */
+    protected void removeSurrogate(PositionableEntity entity) {
+
+        DefaultSurrogateEntityWrapper surrogate =
+            GenerateSurrogate.getInstance().createEmptySurrogate(entity);
+
+        if (surrogate != null) {
+            collisionChecker.removeSurrogate(surrogate);
+        }
+    }
+
+    /**
+     * Some commands require the entity to be moved at the end so that auto
+     * add items will be added back in.  This helper utility does just that.
+     *
+     * @param model The WorldModel that holds the data
+     * @param entity The entity to be nudged
+     * @param position The position to nudge it to, if null use the entity's
+     * current position
+     */
+    protected void nudgeEntity(WorldModel model, Entity entity, double[] position) {
+
+        // First remove all auto added children, and create their surrogates
+        ArrayList<Entity> children = entity.getChildren();
+
+        for (int i = 0; i < children.size(); i++) {
+
+            Boolean isAutoAdd = (Boolean)
+                RulePropertyAccessor.getRulePropertyValue(
+                        children.get(i),
+                        ChefX3DRuleProperties.IS_AUTO_ADD_PRODUCT);
+
+            if (isAutoAdd) {
+
+                RemoveEntityChildCommand rmvCmd =
+                    new RemoveEntityChildCommand(
+                            model,
+                            entity,
+                            children.get(i));
+
+                addSurrogate(rmvCmd);
+                addNewlyIssuedCommand(rmvCmd);
+            }
+        }
+
+        // Get the position if it is not supplied
+        if (position == null) {
+            position = new double[3];
+            ((PositionableEntity)entity).getPosition(position);
+        }
+
+        // Next, move the entity
+        MoveEntityCommand mvCmd = new MoveEntityCommand(
+            model,
+            model.issueTransactionID(),
+            entity.getEntityID(),
+            position,
+            position);
+
+        ArrayList<Command> cmdList = new ArrayList<Command>();
+        cmdList.add(mvCmd);
+
+        MultiCommand multCmd = new MultiCommand(
+                cmdList,
+                "MultiCmd -> Nudge the entity",
+                true,
+                false);
+
+        addNewlyIssuedCommand(multCmd);
+    }
+
+    /**
+     * Get the zone relative start and end positions for the transition entity
+     * child command.
+     *
+     * @param model WorldModel to reference
+     * @param command TransitionEntityChildCommand to extract data from
+     * @param relativeStart Relative start position
+     * @param relativeEnd Releative end position
+     */
+    protected void getTransitionEntityChildZoneValues(
+            WorldModel model,
+            TransitionEntityChildCommand command,
+            double[] relativeStart,
+            double[] relativeEnd) {
+
+        double[] startParentRelPos =
+            getPositionRelativeToZone(
+                    model,
+                    command.getStartParentEntity());
+
+        double[] endParentRelPos =
+            getPositionRelativeToZone(
+                    model,
+                    command.getEndParentEntity());
+
+        command.getStartPosition(relativeStart);
+        command.getEndPosition(relativeEnd);
+
+        relativeStart[0] += startParentRelPos[0];
+        relativeStart[1] += startParentRelPos[1];
+        relativeStart[2] += startParentRelPos[2];
+
+        relativeEnd[0] += endParentRelPos[0];
+        relativeEnd[1] += endParentRelPos[1];
+        relativeEnd[2] += endParentRelPos[2];
+    }
+
+    /**
+     * Check if there is a relationship between the auto spanning entity and
+     * the non auto spanning entity that would allow their collision to be
+     * legal.
+     *
+     * @param autoSpanEntity Entity that auto spans
+     * @param nonAutoSpanEntity Entity to check agains auto span
+     * @return True if they are legal, false if not
+     */
+    protected boolean isAllowedAutoSpanCollision(
+            Entity autoSpanEntity,
+            Entity nonAutoSpanEntity) {
+
+        // see if it is an allowed collision.
+
+        String[] classifications = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    autoSpanEntity,
+                    ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+        String[] relationships = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                nonAutoSpanEntity,
+                ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+        Boolean canPlaceOnAutoSpan = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                    nonAutoSpanEntity,
+                    ChefX3DRuleProperties.CAN_PLACE_ON_SPAN_OBJECT);
+
+        // Entities that can be placed on auto span products
+        // have to have this flag set.
+        if (!canPlaceOnAutoSpan) {
+            return false;
+        }
+
+        // If either of these data are null, return false
+        if (classifications == null ||
+                relationships == null) {
+
+            return false;
+        }
+
+        boolean autoSpanMatched = false;
+
+        for (int w = 0; w < classifications.length; w++) {
+
+            for (int x = 0;
+                    x < relationships.length; x++) {
+
+                if (classifications[w].equalsIgnoreCase(
+                        relationships[x])) {
+
+                    autoSpanMatched = true;
+                    break;
+                }
+            }
+
+            if (autoSpanMatched) {
+                break;
+            }
+        }
+
+        return autoSpanMatched;
+    }
+
+
+    //--------------------------------------------------------------------
+    // Private methods
+    //--------------------------------------------------------------------
+
+
+    /**
+     * Add an entity to the entityMatches list and classificationMatchCountMap
+     *
+     * @param entity Entity
+     * @param classRelationship String
+     */
+    private void addMatch(ArrayList<Entity> match, HashMap<String,Integer> matchCount, Entity entity, String classRelationship){
+
+        match.add(entity);
+
+        Integer count = matchCount.get(classRelationship);
+
+        if(count == null){
+            matchCount.put(classRelationship, 1);
+        } else {
+            count++;
+            matchCount.put(classRelationship, count);
+        }
+    }
+
+
+    /**
+     * Add an entity to the entityMatches list and classificationMatchCountMap
+     *
+     * @param entity Entity
+     * @param classRelationship String
+     */
+    private void addModelMatch(Entity entity, String classRelationship){
+
+        entityMatches.add(entity);
+
+        Integer count = entityMatchCountMap.get(classRelationship);
+
+        if(count == null){
+            entityMatchCountMap.put(classRelationship, 1);
+        } else {
+            count++;
+            entityMatchCountMap.put(classRelationship, count);
+        }
+    }
+
+    /**
+     * Add an entity to the zoneEntityMatches list
+     *
+     * @param entity
+     */
+    private void addZoneMatch(Entity entity, String classRelationship){
+
+        zoneEntityMatches.add(entity);
+
+        Integer count = zoneMatchCountMap.get(classRelationship);
+
+        if(count == null){
+            zoneMatchCountMap.put(classRelationship, 1);
+        } else {
+            count++;
+            zoneMatchCountMap.put(classRelationship, count);
+        }
+    }
+
+    /**
+     * Add an entity to the wallEntityMatches list
+     *
+     * @param entity
+     */
+    private void addSegmentMatch(Entity entity, String classRelationship){
+
+        wallEntityMatches.add(entity);
+
+        Integer count = wallMatchCountMap.get(classRelationship);
+
+        if(count == null){
+            wallMatchCountMap.put(classRelationship, 1);
+        } else {
+            count++;
+            wallMatchCountMap.put(classRelationship, count);
+        }
+    }
+
+    /**
+     * Add an entity to the replaceEntityMatches list
+     *
+     * @param entity
+     */
+    private void addReplaceMatch(Entity entity){
+
+        replaceEntityMatches.add(entity);
+    }
+
+    /**
+     * Clean up the relClass into a representative HashMap of the each
+     * expressed relationship with duplicates accounted for in the Integer
+     * value of the HashMap. When evaluating the relAmt, if the Integer
+     * quantity stored in the HashMap is > 1, then it is used in place
+     * of the relAmt specified.
+     *
+     * @param relClass String to parse
+     * @return HashMap<String, Integer> or null if relClass doesn't contain :
+     */
+    private HashMap<String, Integer> cleanClassRelationship(String relClass) {
+
+        if (!relClass.contains(":")) {
+            return null;
+        }
+
+        HashMap<String, Integer> cleanedResults =
+            new HashMap<String, Integer>();
+
+        StringTokenizer st = new StringTokenizer(relClass, ":");
+        String token;
+
+        while(st.hasMoreTokens()){
+
+            token = st.nextToken();
+
+            Integer count = cleanedResults.get(token);
+
+            if (count == null) {
+                cleanedResults.put(token, 1);
+            } else {
+                count++;
+                cleanedResults.put(token, count);
+            }
+        }
+
+        return cleanedResults;
+    }
+
+
+
+    /**
+     * Determines if a wall is at a specific angle with the adjacent wall
+     * @param model - WorldModel
+     * @param entity - current  entity to find  if the wall it is on is at
+     *                  the correct angle
+     * @param positive - a boolean  that when true checks the right end of the wall
+     *                   if false checks the left end
+     * @param angle - the angle to check.
+     * @return false, the wall is at the right angle or there are no adjacent walls
+     * , true the wall is at a wrong angle
+     */
+    public boolean isWallAtSpecificAngle(
+            WorldModel model,
+            Entity entity,
+            Entity parentEntity,
+            boolean positive,
+            int angle) {
+
+        Entity entityParentZone =  getParentZoneEntity(model, entity);
+
+        if(parentEntity == null) {
+            entityParentZone =  getParentZoneEntity(model, entity);
+        }else {
+            entityParentZone = parentEntity;
+        }
+
+        if(entityParentZone == null ||
+               entityParentZone.getType() != Entity.TYPE_SEGMENT){
+
+            return false;
+        }
+
+        // Checks to determine if either wall is not a 90 degree
+        // if it is not does not allow the autospan to occur
+        Vector3d entityDirectionVector=
+            ((SegmentEntity)entityParentZone).getFaceVector();
+
+        Vector3d adjacentDirectionVector=null;
+        double currentAngle = 0;
+        int angleTruncate= 0;
+
+
+        float[] boundsAdj = null;
+        SegmentEntity adjacentWall = null;
+
+        SegmentableEntity segmentable =
+            (SegmentableEntity)model.getEntity(entityParentZone.getParentEntityID());
+
+        if(positive) {
+            adjacentWall = findAdjacentWall(segmentable,
+                    ((SegmentEntity)entityParentZone).getEndVertexEntity(),
+                     positive);
+
+        }else {
+
+             adjacentWall = findAdjacentWall(segmentable,
+                    ((SegmentEntity)entityParentZone).getStartVertexEntity(),
+                     positive);
+        }
+
+        if(adjacentWall == null ||
+                adjacentWall.getType() != Entity.TYPE_SEGMENT) {
+            return false;
+        }
+
+        adjacentDirectionVector= ((SegmentEntity)adjacentWall).getFaceVector();
+        currentAngle = entityDirectionVector.angle(adjacentDirectionVector);
+        angleTruncate= (int)Math.round(Math.toDegrees(currentAngle));
+
+        if(angleTruncate != angle) {
+            return true;
+        }
+
+        return false;
+
+    }
+
+    /**
+     * Used by the isWallAtSpecificAngle method to find the adjacent wall
+     * @param segmentable - The segmentable Entity
+     * @param vertex - Either the start or end vertex.
+     * @param start - A boolean flag to determine if the method should check
+     *                  the segments start vertex or end vertex.
+     * @return The segment entity adjacent to the current wall or null if not found
+     */
+    private SegmentEntity findAdjacentWall(SegmentableEntity segmentable, VertexEntity vertex, boolean start) {
+
+
+        ArrayList<SegmentEntity> completeSegmentList = segmentable.getSegments();
+        int vertexID = vertex.getEntityID();
+
+        for(SegmentEntity segment: completeSegmentList) {
+
+            if(start) {
+
+                if(segment.getStartVertexEntity().getEntityID() == vertexID) {
+                    return segment;
+                }
+
+            }else {
+                if(segment.getEndVertexEntity().getEntityID() == vertexID) {
+                    return segment;
+                }
+            }
+
+        }
+
+        return null;
+    }
+
+    /**
+     * Log a failure to the console.
+     */
+    protected void logFailure(String st) {
+        System.out.println("Rule Failure: " + getClass().getSimpleName() + " reason: " + st);
+    }
+}

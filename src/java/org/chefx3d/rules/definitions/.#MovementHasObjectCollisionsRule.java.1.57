@@ -1,0 +1,391 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+
+//Internal Imports
+import java.util.*;
+
+import org.chefx3d.model.*;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+
+/**
+* Determines if Entity is colliding with other objects and responds
+* with correction if required. Also performs selection highlighting for transient
+* commands that are causing a collection.
+*
+* @author Ben Yarger
+* @version $Revision: 1.57 $
+*/
+public class MovementHasObjectCollisionsRule extends Rule{
+
+    /** Status message when mouse button released and collisions exist */
+    private static final String MV_PLACE_COL_PROP =
+        "org.chefx3d.rules.definitions.MovementHasObjectCollisionsRule.cannotMove";
+
+    /** Status message when illegal collisions exist for transient commands */
+    private static final String MV_TRANS_COL_PROP =
+        "org.chefx3d.rules.definitions.MovementHasObjectCollisionsRule.collisionsExist";
+
+    /** Static class instance */
+    private static MovementHasObjectCollisionsRule rule =
+        new MovementHasObjectCollisionsRule();
+
+    /** Private constructor. All Rule classes should be implemented this way. */
+    private MovementHasObjectCollisionsRule(){
+
+        ruleType = RULE_TYPE.INVIOLABLE;
+    }
+
+    /**
+     * Return class instance
+     * @return SnapToRotationValueRule
+     */
+    public static MovementHasObjectCollisionsRule getInstance(){
+        return rule;
+    }
+
+    /**
+     * Check if the Entity collides with objects.
+     *
+     * @param entity Entity object
+     * @param model WorldModel object
+     * @param command Command object
+     * @return boolean True if collisions exist, false otherwise
+     */
+    @Override
+    protected boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command){
+
+        if(entity.getType() == Entity.TYPE_VERTEX||
+                entity.getType() == Entity.TYPE_SEGMENT ) {
+            return true;
+        }
+
+        // get the collision map before the move happened
+        HashMap<Entity, ArrayList<Entity>> startingAutoSpanCollisionMap =
+            getStartingAutoSpanCollisionMap(model, entity, command);
+
+        // get the collision list after the move is done
+        performExtendedCollisionCheck(command);
+
+        //printCollisionEntitiesMap();
+
+        // If collisionEntities is null (no collisions occurred) then return false
+        if (collisionEntitiesMap == null) {
+            return true;
+        }
+
+        // get the final position of the entity
+        double[] pos = new double[3];
+        if (command instanceof MoveEntityCommand) {
+            ((MoveEntityCommand)command).getEndPosition(pos);
+        } else if (command instanceof MoveEntityTransientCommand) {
+            ((MoveEntityTransientCommand)command).getPosition(pos);
+        } else if (command instanceof TransitionEntityChildCommand) {
+            ((TransitionEntityChildCommand)command).getEndPosition(pos);
+        }
+
+        // Debug
+        //printCollisionEntitiesMap();
+
+        // get the list of connected auto-spans to ignore
+        int[] ignoreEntities = null;
+        boolean isValid = true;
+
+        ArrayList<Entity> autoSpanEntities = new ArrayList<Entity>();
+        float[] minExtents = new float[3];
+        float[] maxExtents = new float[3];
+
+        Iterator<Map.Entry<Entity, ArrayList<Entity>>> itr =
+            collisionEntitiesMap.entrySet().iterator();
+        while (itr.hasNext()) {
+            Map.Entry<Entity, ArrayList<Entity>> next = itr.next();
+
+            Entity check = next.getKey();
+            ArrayList<Entity> checkList = next.getValue();
+
+            // get the starting list
+            ArrayList<Entity> startingList =
+                startingAutoSpanCollisionMap.get(check);
+
+            for(int i = 0; i < checkList.size(); i++){
+
+                Entity tmpEntity = checkList.get(i);
+
+                Boolean autoSpan =
+                    (Boolean)RulePropertyAccessor.getRulePropertyValue(
+                            tmpEntity,
+                            ChefX3DRuleProperties.SPAN_OBJECT_PROP);
+
+                Boolean insideParent =
+                    (Boolean)RulePropertyAccessor.getRulePropertyValue(
+                            check,
+                            ChefX3DRuleProperties.PLACED_INSIDE_PARENT);
+
+                if (autoSpan) {
+
+                    if (isAllowedAutoSpanCollision(tmpEntity, entity)) {
+                        continue;
+                    }
+
+                    // Do the standard procedure to add the auto span to the ignore list
+                    autoSpanEntities.add(tmpEntity);
+
+                    // make sure the incoming item is not in the middle of a span
+                    ((PositionableEntity)tmpEntity).getExtents(minExtents, maxExtents);
+
+                    if (pos[0] > minExtents[0] && pos[0] < maxExtents[0] &&
+                            !startingList.contains(tmpEntity) &&
+                            !insideParent) {
+                        isValid = false;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if (autoSpanEntities.size() > 0) {
+            ignoreEntities = new int[autoSpanEntities.size()];
+            for(int i = 0; i < autoSpanEntities.size(); i++) {
+                ignoreEntities[i] = autoSpanEntities.get(i).getEntityID();
+            }
+        }
+
+
+
+        // only perform these if the auto-span check succeeded
+        if (isValid) {
+            // Perform collision analysis
+            performExtendedCollisionAnalysisHelper(null, false, ignoreEntities);
+
+            // EMF: fail in the case where there are collisions
+            // with 'potential' parents
+            if(failFromPotentialParentCollisions(entity)){
+                return false;
+            }
+
+            // If there are no collisionEntities, see if the reserved None
+            // relationship classification exists. If so, then we are cool,
+            // return true, no illegal collisions.
+
+            if (!legalZeroCollisionExtendedCheck()) {
+                return true;
+            }
+
+            // Make sure collisions are legal - return true if collisions are
+            // legal.
+            if (!hasIllegalCollisionExtendedHelper()) {
+                return true;
+            }
+        }
+
+        // No legal cases were found, return true - illegal collisions exist.
+        // Reset values to put entity back at starting position.
+        if(command instanceof MoveEntityCommand){
+            String msg = intl_mgr.getString(MV_PLACE_COL_PROP);
+            popUpMessage.showMessage(msg);
+
+            return false;
+
+        } else if (command instanceof TransitionEntityChildCommand &&
+                !command.isTransient()){
+
+            String msg = intl_mgr.getString(MV_PLACE_COL_PROP);
+            popUpMessage.showMessage(msg);
+
+            return false;
+
+        } else {
+
+            String msg = intl_mgr.getString(MV_TRANS_COL_PROP);
+            statusBar.setMessage(msg);
+            return false;
+
+        }
+
+    }
+
+    //---------------------------------------------------------------
+    // Local methods
+    //---------------------------------------------------------------
+
+    /**
+     * This method returns TRUE if the entity has a permanent
+     * parent set and yet it intersects with one or more
+     * potential parents. <p>
+     * Example test case: in a situation where a closet rod is
+     * already parented to a shelf, if one moves the closetrod
+     * so that it intersects another shelf on an adjacent wall,
+     * then this method should return TRUE.
+     *
+     * @author Eric Fickenscher
+     * @param entity the currently-moving entity
+     * @return TRUE if there is a permanent parent set and there
+     * is collision with one or more potential parents.
+     */
+    private boolean failFromPotentialParentCollisions(Entity entity){
+
+        Boolean permanentParentSet =
+            (Boolean)RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.PERMANENT_PARENT_SET);
+
+        //
+        // If a permanentParent is set, then we do not want to
+        // allow the moving entity to collide with any other
+        // potential parents
+        //
+        if( permanentParentSet != null && permanentParentSet){
+
+            //
+            // get the allowed parents
+            //
+            List<String> allowedParents = Arrays.asList((String[])
+                    RulePropertyAccessor.getRulePropertyValue(
+                        entity,
+                        ChefX3DRuleProperties.ALLOWED_PARENT_CLASSIFICATIONS));
+
+            //
+            // look through the collisions and see if any of them
+            // could be potential parents.  If so, this means we
+            // have a situation where an entity with a permanent parent
+            // set needs its movement restricted because it has
+            // a bad collision.
+            //
+            ArrayList<Entity> collisions = collisionEntitiesMap.get(entity);
+
+            for( Entity collision : collisions ){
+
+                List<String> classifications = Arrays.asList((String[])
+                    RulePropertyAccessor.getRulePropertyValue(collision,
+                        ChefX3DRuleProperties.CLASSIFICATION_PROP));
+
+                for(String parent : allowedParents){
+                    if(classifications.contains(parent))
+                        return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Get the list of auto-span entities in collision before the move happened
+     *
+     * @param model
+     * @param entity
+     * @param command
+     * @return The map of collisions, empty map if none found
+     */
+    private HashMap<Entity, ArrayList<Entity>> getStartingAutoSpanCollisionMap(
+            WorldModel model,
+            Entity entity,
+            Command command) {
+
+        double[] pos = new double[3];
+        float[] rot = new float[4];
+
+        // ignore if not a positional entity
+        if(!(entity instanceof PositionableEntity)) {
+            return null;
+        }
+
+        // create the commands
+        Command tempCmd = null;
+        if (command instanceof MoveEntityCommand) {
+
+            ((MoveEntityCommand)command).getStartPosition(pos);
+
+            tempCmd = new MoveEntityCommand(
+                    model,
+                    command.getTransactionID(),
+                    entity.getEntityID(),
+                    pos,
+                    pos);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            ((PositionableEntity)entity).getStartingPosition(pos);
+
+            tempCmd = new MoveEntityTransientCommand(
+                    model,
+                    command.getTransactionID(),
+                    entity.getEntityID(),
+                    pos,
+                    new float[3]);
+
+        } else if (command instanceof TransitionEntityChildCommand) {
+            // Get the start position from the command as the entity is relative to
+            // the current parent not the startParent
+
+            ((TransitionEntityChildCommand)command).getStartPosition(pos);
+            ((TransitionEntityChildCommand)command).getStartingRotation(rot);
+
+            tempCmd = new TransitionEntityChildCommand(
+                    model,
+                    ((PositionableEntity)entity),
+                    ((TransitionEntityChildCommand)command).getStartParentEntity(),
+                    pos,
+                    rot,
+                    ((TransitionEntityChildCommand)command).getStartParentEntity(),
+                    pos,
+                    rot,
+                    command.isTransient());
+        }
+
+        performExtendedCollisionCheck(tempCmd);
+
+
+        ArrayList<Entity> startingCollisionList;
+
+        // the return map
+        HashMap<Entity, ArrayList<Entity>> startingCollisionEntitiesMap =
+            new HashMap<Entity, ArrayList<Entity>>();
+
+        Iterator<Map.Entry<Entity, ArrayList<Entity>>> itr =
+            collisionEntitiesMap.entrySet().iterator();
+        while (itr.hasNext()) {
+            Map.Entry<Entity, ArrayList<Entity>> next = itr.next();
+
+            ArrayList<Entity> check = next.getValue();
+
+            startingCollisionList = new ArrayList<Entity>();
+            for(int i = 0; i < check.size(); i++){
+
+                Entity tmpEntity = check.get(i);
+
+                Boolean autoSpan = (Boolean)
+                    RulePropertyAccessor.getRulePropertyValue(
+                            tmpEntity,
+                            ChefX3DRuleProperties.SPAN_OBJECT_PROP);
+
+                if (autoSpan) {
+                    startingCollisionList.add(tmpEntity);
+                }
+            }
+
+            startingCollisionEntitiesMap.put(
+                    next.getKey(), startingCollisionList);
+
+        }
+
+        return startingCollisionEntitiesMap;
+
+    }
+
+}

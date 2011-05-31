@@ -1,0 +1,121 @@
+<html>
+<head>
+<title>ChefX3D - Exporter Design</title>
+</head>
+
+<body>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+</center>
+
+<h1 align=center>Exporter Design</h1>
+
+<p>
+Export a world model to some format.
+</p>
+
+<hr/>
+
+<a name="Concepts">
+<h2>Concepts</h2></a>
+<p>
+<h3>Project Specific Export</h3>
+<p>
+Projects may need to have project specific aspects to their export.
+Application specific code will be injectible into the export process.
+XML Stylesheets are used to allow end-users to easily edit the generated content.
+</p>
+<h3>SMAL Export</h3>
+<p>
+Export to SMAL should capture all data that the tool can edit.
+<p>
+Right now the export is not really SMAL.  I'm less positive that SMAL will be able to contain
+everything we need.  Or at least its extention mechanism doesn't align well with our needs.
+<p>
+
+All entities are written out using the following template
+<pre>
+&lt;ChefX3D&gt;
+  &lt;EntityParams&gt;
+     &lt;Sheet name="Sheet1" /&gt;
+     &lt;Sheet name="Sheet2" /&gt;
+     ...
+  &lt;/EntityParams&gt;
+  &lt;ToolParams entityID="" name="" type="" url=""&gt;
+     &lt;Transform rotation="" translation=""/&gt;
+     &lt;Segments&gt;
+         &lt;Segment center=""
+                end=""
+                endId=""
+                rotation=""
+                start=""
+                startId="" &gt;
+
+            &lt;SegmentParams&gt;
+               &lt;Sheet name="Sheet1" /&gt;
+               &lt;Sheet name="Sheet2" /&gt;
+            &lt;/SegmentParams&gt;
+
+            &lt;StartVertexParams&gt;
+               &lt;Sheet name="Sheet1" /&gt;
+               &lt;Sheet name="Sheet2" /&gt;
+               ...
+            &lt;/StartVertexParams&gt;
+            &lt;EndVertexParams&gt;
+               &lt;Sheet name="" /&gt;
+               &lt;Sheet name="" /&gt;
+               ...
+            &lt;/EndVertexParams&gt;
+       &lt;/Segment&gt;
+    &lt;/Segments&gt;
+ &lt;/ToolParams&gt;
+&lt;/ChefX3D&gt;
+</pre>
+</p>
+
+<h3>X3D Export</h3>
+X3D Export is handled by a set of Stylesheets.  They take the XML form of the SMAL export and then
+style that to the X3D desired.
+<p>
+There are three stylesheets supported.  Global, View, Regular.
+
+Global styles are run at the beginning of the X3D file.  This is typically where extern proto's
+are written.  No matter how many entities are created this stylesheet will only be called once.
+<p>
+View styles are run when X3D is needed for a View.  This form may be optimized for use by the
+viewer.
+<p>
+Regular styles are run when exporting the entity to the body of the X3D file.
+
+
+</p>
+<h3>GML Export</h3>
+Exporting to GML would be a good feature.
+</p>
+
+<hr>
+
+<h2>Open Issues</h2>
+
+How to accomplish the application specific piece without having them
+rewrite the base exporters.  Ie if we write a good X3D exporter we don't
+want them just taking a static cut.
+<p>
+Most of the usage to date has been either
+
+<hr>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+<br>
+<i>Last Updated: $Date: 2007/05/21 21:22:54 $<br>
+Version: $Revision: 1.2 $</I>
+</center>
+
+</body>
+</html>

@@ -1,0 +1,34 @@
+Property Panel Design
+
+Currently creates editing panel from the tool's DOM.  
+
+Ideally would create panel from the schema.
+   AppInfo would tell what special editors to use.
+     File Dialog
+     ComboBox
+     
+     
+Partial Solution
+   Use the userData field of DOM to store an integer for UI type.  
+   
+
+Data Editors:
+
+Types:
+   File Dialog
+      extensions
+   Tool
+   ComboBox
+      legal values
+      type-in allowed
+   
+
+
+
+Example:
+   Viskit Behavior
+      Needs a file dialog
+      Needs to update the stylesheet used for transformation
+         Problem as stylesheet is a Tool property not an instance
+      Needs to parse Viskit Event Graph and add a property panel
+   

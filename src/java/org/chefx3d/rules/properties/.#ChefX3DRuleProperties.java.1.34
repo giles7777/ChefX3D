@@ -1,0 +1,564 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2010
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.properties;
+
+//External Imports
+
+//Internal Imports
+
+/**
+ * Defines all ChefX3D rule properties. Project specific properties and their
+ * rules exist only in that specific project. These are universal properties
+ * shared by all proejcts.
+ *
+ * @author Ben Yarger
+ * @version $Revision: 1.34 $
+ */
+public class ChefX3DRuleProperties {
+
+    //---------------------------------------------------------------
+    // Fixed constants
+    //---------------------------------------------------------------
+
+    /** The maximum allowable wall height 2.4384 m = 96" or 8' */
+    public static final double MAXIMUM_WALL_HEIGHT = 2.4384;
+
+    /** The illegal condition selection box color */
+    public static final float[] ILLEGAL_CONDITION_COLOR = new float[] {1.0f, 0.0f, 0.0f};
+
+    /** The warning condition selection box color */
+    public static final float[] WARNING_CONDITION_COLOR = new float[] {1.0f, 1.0f, 0.0f};
+
+    //---------------------------------------------------------------
+    // Enumerated objects - used by specific properties for values
+    //---------------------------------------------------------------
+
+    /** Possible values denoting restriction of rotation to specific axis */
+    public enum ROTATION_RESTRICTION_AXIS_VALUES {XAXIS, YAXIS, ZAXIS, NONE};
+
+    /** Possible values denoting restriction of scaling/size change controls */
+    public enum SCALE_RESTRICTION_VALUES {
+        XAXIS,
+        YAXIS,
+        ZAXIS,
+        XYPLANE,
+        XZPLANE,
+        YZPLANE,
+        UNIFORM,
+        NONE};
+
+    /** Possible values denoting restriction of movement to a specific plane */
+    public enum MOVEMENT_PLANE_RESTRICTION_VALUES {
+        XYPLANE,
+        YZPLANE,
+        XZPLANE,
+        NONE};
+
+    /** Possible values denoting relationship modifier */
+    public enum RELATIONSHIP_MODIFIER_VALUES {
+        LESS_THAN,
+        GREATER_THAN,
+        LESS_THAN_OR_EQUAL_TO,
+        GREATER_THAN_OR_EQUAL_TO,
+        EQUAL_TO,
+        NOT_EQUAL_TO,
+        NONE};
+
+    /** Possible values specifying initial relative product positioning */
+    public enum RELATIVE_GENERAL_POSITION {
+        FRONT,
+        BACK,
+        LEFT,
+        RIGHT,
+        TOP,
+        BOTTOM,
+        CENTER,
+        CENTER_HORIZONTAL,
+        CENTER_VERTICAL,
+        FRONT_HORIZONTAL,
+        FRONT_VERTICAL,
+        BACK_HORIZONTAL,
+        BACK_VERTICAL,
+        LEFT_HORIZONTAL,
+//      LEFT_VERTICAL, -- Would never lock left
+        RIGHT_HORIZONTAL,
+//      RIGHT_VERTICAL, -- Would never lock right
+//      TOP_HORIZONTAL, -- would never lock top
+        TOP_VERTICAL,
+//      BOTTOM_HORIZONTAL, -- would never lock bottom
+        BOTTOM_VERTICAL};
+
+    /**
+     * Possible values specifying appropriate adjustment axis for position
+     * targets (Collision placement position rules).
+     */
+    public enum POSITION_TARGET_ADJUSTMENT_AXIS {
+        XAXIS,
+        YAXIS,
+        ZAXIS};
+
+    /**
+     * Possible values for axis specific scale model changes.
+     */
+    public enum SCALE_CHANGE_MODEL_AXIS {
+        XAXIS,
+        YAXIS,
+        ZAXIS};
+
+    /**
+     * Possible orientation states that any given entity can have.
+     */
+    public enum ORIENTATION_STATE {
+        LEFT,
+        RIGHT};
+
+    //---------------------------------------------------------------
+    // Internal use only properties - SHOULD NEVER BE SET BY USER!!
+    //---------------------------------------------------------------
+
+    /** Exists and is true only if the entity was auto added to the scene */
+    public static final String IS_AUTO_ADD_PRODUCT = "CX.isAutoAdd";
+
+    /** Specifies the tools to use for auto placement when parent scales. */
+    public static final String AUTO_PLACE_OBJECT_TOOLS_PROP = "CX.autoPlTools";
+
+    /**
+     * Specifies the tools to use for adding invisible children when parent
+     * is added to the scene.
+     */
+    public static final String INVISIBLE_CHILDREN_TOOLS_PROP = "CX.invisTools";
+
+    /** Flags when the permanent parent rule is set */
+    public static final String PERMANENT_PARENT_SET = "CX.permParentSet";
+
+    /** Flags transient orientation as left or right */
+    public static final String LIVE_STATE_ORIENTATION = "CX.liveStateOrient";
+
+    //---------------------------------------------------------------
+    // Object/Entity properties/Misc
+    //---------------------------------------------------------------
+
+    /**
+     * Holds a boolean where true means the Object/Entity is editable.
+     * False means the Object/Entity is not editable. This is the first
+     * check performed before any others. If it is false no further action
+     * is generally allowed.
+     */
+    public static final String IS_EDITABLE_PROP = "CX.isEditable";
+
+    /** Defines the maximum size for an Object/Entity. */
+    public static final String MAXIMUM_OBJECT_SIZE_PROP = "CX.maxObjSize";
+
+    /** Defines the minimum size for an Object/Entity. */
+    public static final String MINIMUM_OBJECT_SIZE_PROP = "CX.minObjSize";
+
+    /**
+     * Defines the depth to put the entity inside the parent entity.
+     * At this time, used for doors and windows to help place them
+     * in the wall correctly.
+     */
+    public static final String EMBED_DEPTH_PROP = "CX.embedDepth";
+
+    /** Prevent entity from being deleted if set to true */
+    public static final String CAN_DELETE_PROP = "CX.canDel";
+
+    /** Prevents wall edge snap from being applied to product */
+    public static final String IGNORE_WALL_EDGE_SNAP = "CX.noWallEdgeSnap";
+
+
+    //---------------------------------------------------------------
+    // Movement properties
+    //---------------------------------------------------------------
+
+    /**
+     * If exists, and not set to none, movement is restricted to a specific
+     * plane. Use of this property results in movement data in the illegal
+     * axis being removed from the command.
+     */
+    public static final String MOVEMENT_RESTRICTED_TO_PLANE_PROP = "CX.mvResToPlane";
+
+    /** If exists and not false, then the movement is based on snaps and they should be used to update the position. */
+    public static final String MOVEMENT_USES_SNAPS_PROP = "CX.mvUseSnap";
+
+    /** Movement of entity uses absolute snaps. */
+    public static final String MOVEMENT_USES_ABSOLUTE_SNAPS_PROP = "CX.mvUseAbsSnap";
+
+    /** Absolute snap values for movement along x axis. */
+    public static final String MOVEMENT_ABSOLUTE_X_AXIS_SNAP_PROP = "CX.mvAbsXAxisSnap";
+
+    /** Absolute snap values for movement along y axis. */
+    public static final String MOVEMENT_ABSOLUTE_Y_AXIS_SNAP_PROP = "CX.mvAbsYAxisSnap";
+
+    /** Absolute snap values for movement along z axis. */
+    public static final String MOVEMENT_ABSOLUTE_Z_AXIS_SNAP_PROP = "CX.mvAbsZAxisSnap";
+
+    /** Movement of entity uses incremental snaps. */
+    public static final String MOVEMENT_USES_INCREMENTAL_SNAPS_PROP = "CX.mvUseIncSnap";
+
+    /** Incremental snap value for movement along x axis. */
+    public static final String MOVEMENT_INCREMENTAL_X_AXIS_SNAP_PROP = "CX.mvIncXAxisSnap";
+
+    /** Incremental snap value for movement along y axis. */
+    public static final String MOVEMENT_INCREMENTAL_Y_AXIS_SNAP_PROP = "CX.mvIncYAxisSnap";
+
+    /** Incremental snap value for movement along z axis. */
+    public static final String MOVEMENT_INCREMENTAL_Z_AXIS_SNAP_PROP = "CX.mvIncZAxisSnap";
+
+    /** Incremental snap values for special case movement along x axis. */
+    public static final String MOVEMENT_INCREMENTAL_X_AXIS_SPECIAL_CASE_SNAP_PROP = "CX.mvIncXAxisSCSnap";
+
+    /** Incremental snap values for special case movement along y axis. */
+    public static final String MOVEMENT_INCREMENTAL_Y_AXIS_SPECIAL_CASE_SNAP_PROP = "CX.mvIncYAxisSCSnap";
+
+    /** Incremental snap values for special case movement along z axis. */
+    public static final String MOVEMENT_INCREMENTAL_Z_AXIS_SPECIAL_CASE_SNAP_PROP = "CX.mvIncZAxisSCSnap";
+
+    /** Snap to a product or product classification */
+    public static final String SNAP_TO_CLASS_PROP = "CX.snapToClass";
+
+    /** Incremental x axis snap exceptions specified by index */
+    public static final String INC_X_SNAP_EXCLUDE_PROP = "CX.incXExcl";
+
+    /** Incremental y axis snap exceptions specified by index */
+    public static final String INC_Y_SNAP_EXCLUDE_PROP = "CX.incYExcl";
+
+    /** Incremental z axis snap exceptions specified by index */
+    public static final String INC_Z_SNAP_EXCLUDE_PROP = "CX.incZExcl";
+
+    //---------------------------------------------------------------
+    // Rotation properties
+    //---------------------------------------------------------------
+
+    /** If doesn't exist or is set to true, the object can rotate, otherwise false. */
+    public static final String CAN_ROTATE_PROP = "CX.canRotate";
+
+    /** If exists, and not set to NONE, rotation is restricted to axis assigned. Uses Enum ROTATION_RESTRICTION_AXIS_VALUES. */
+    public static final String ROTATION_AXIS_RESTRICTION_PROP = "CX.rotAxisRes";
+
+    /** If exists, the float value is used as an incremental adjustment to the rotation of the object. Expects values to be in radians. */
+    public static final String SNAP_TO_ROTATION_INCREMENT_PROP = "CX.snapToRotInc";
+
+    /** If exists, the float[] values are used to adjust the rotation to a fixed number of positions. Expects values to be in radians. */
+    public static final String SNAP_TO_ROTATION_ABSOLUTE_VALUE_PROP = "CX.snapToRotAbsValue";
+
+
+
+
+    //---------------------------------------------------------------
+    // Scale/Size properties
+    //---------------------------------------------------------------
+
+    /** If doesn't exist or is set to true, the object can scale, otherwise false. */
+    public static final String CAN_SCALE_PROP = "CX.canScale";
+
+    /**
+     * Restricts scaling based on Enum SCALE_RESTRICTION_VALUES. If not set,
+     * or NONE specified, scaling/resizing is allowed on all axis within the
+     * confines of the maximum and minimum size values.
+     */
+    public static final String SCALE_RESTRICTION_PROP = "CX.scaleRes";
+
+    /**
+     * Restricts scaling to bounds of parent object.
+     */
+    public static final String SCALE_BOUND_BY_PARENT_PROP = "CX.parentBoundsRes";
+
+    /** If exists and not false, then the scale is based on snaps and they should be used to update the scale. */
+    public static final String SCALE_USES_SNAPS_PROP = "CX.scUseSnap";
+
+    /** Scale of entity uses absolute snaps. */
+    public static final String SCALE_USES_ABSOLUTE_SNAPS_PROP = "CX.scUseAbsSnap";
+
+    /** Absolute snap values for scale along x axis. */
+    public static final String SCALE_ABSOLUTE_X_AXIS_SNAP_PROP = "CX.scAbsXAxisSnap";
+
+    /** Absolute snap values for scale along y axis. */
+    public static final String SCALE_ABSOLUTE_Y_AXIS_SNAP_PROP = "CX.scAbsYAxisSnap";
+
+    /** Absolute snap values for scale along z axis. */
+    public static final String SCALE_ABSOLUTE_Z_AXIS_SNAP_PROP = "CX.scAbsZAxisSnap";
+
+    /** Scale of entity uses incremental snaps. */
+    public static final String SCALE_USES_INCREMENTAL_SNAPS_PROP = "CX.scUseIncSnap";
+
+    /** Incremental snap value for scale along x axis. */
+    public static final String SCALE_INCREMENTAL_X_AXIS_SNAP_PROP = "CX.scIncXAxisSnap";
+
+    /** Incremental snap value for scale along y axis. */
+    public static final String SCALE_INCREMENTAL_Y_AXIS_SNAP_PROP = "CX.scIncYAxisSnap";
+
+    /** Incremental snap value for scale along z axis. */
+    public static final String SCALE_INCREMENTAL_Z_AXIS_SNAP_PROP = "CX.scIncZAxisSnap";
+
+    //---------------------------------------------------------------
+    // Relationship properties
+    //---------------------------------------------------------------
+
+    /** The classification type of the product */
+    public static final String CLASSIFICATION_PROP = "CX.class";
+
+    /** Describes a relationship to a product or product classification */
+    public static final String RELATIONSHIP_CLASSIFICATION_PROP = "CX.relClass";
+
+    /** Describes the number required for the interaction */
+    public static final String RELATIONSHIP_AMOUNT_PROP = "CX.relAmt";
+
+    /** Modifies the number required with ==, >, <, <=, >= etc */
+    public static final String RELATIONSHIP_MODIFIER_PROP = "CX.relMod";
+
+    /** Sets the initial relative position between product and parent */
+    public static final String GENERAL_POSITION_PROP = "CX.genPos";
+
+    /** Specifies the amount of border between product and parent bottom */
+    public static final String BOTTOM_POS_BUFFER_PROP = "CX.botPosBuff";
+
+    /** Specifies the amount of border between product and parent top */
+    public static final String TOP_POS_BUFFER_PROP = "CX.topPosBuff";
+
+    /** Specifies the amount of border between product and parent left */
+    public static final String LEFT_POS_BUFFER_PROP = "CX.leftPosBuff";
+
+    /** Specifies the amount of border between product and parent right */
+    public static final String RIGHT_POS_BUFFER_PROP = "CX.rightPosBuff";
+
+    /** Specifies the amount of border between product and parent front */
+    public static final String FRONT_POS_BUFFER_PROP = "CX.frontPosBuff";
+
+    /** Specifies the amount of border between product and parent back */
+    public static final String BACK_POS_BUFFER_PROP = "CX.backPosBuff";
+
+    /** Specifies the amount of horizontal offset from parent center */
+    public static final String CENTER_HORIZONTAL_POS_BUFF_PROP = "CX.cenHorPosBuff";
+
+    /** Specifies the amount of vertical offset from parent center */
+    public static final String CENTER_VERTICAL_POS_BUFF_PROP = "CX.cenVertPosBuff";
+
+    /** Specifies the amount of depth offset from parent center */
+    public static final String CENTER_DEPTH_POS_BUFF_PROP = "CX.cenDepthPosBuff";
+
+    /** Specifies classifications to replace if in collision with */
+    public static final String REPLACE_PROD_CLASS_PROP = "CX.repProd";
+
+    //---------------------------------------------------------------
+    // Auto placement
+    //---------------------------------------------------------------
+
+    /** Specifies that the product should be loaded without a modelURL */
+    public static final String NO_MODEL_PROP = "CX.noModel";
+
+    /** Specifies the product ids to auto place when parent scales */
+    public static final String AUTO_PLACE_OBJECTS_PROP = "CX.autoPlObj";
+
+    /** Specifies the product ids to add along with parent */
+    public static final String INVISIBLE_CHILDREN_PROP = "CX.invisChldrn";
+
+    /** Auto add n units to the parent only for add actions */
+    public static final String ADD_N_UNITS_PROP = "CX.addNUnits";
+
+    /** Auto add n units positions along x axis */
+    public static final String AUTO_ADD_N_X_POS_PROP = "CX.addNXPos";
+
+    /** Auto add n units positions along y axis */
+    public static final String AUTO_ADD_N_Y_POS_PROP = "CX.addNYPos";
+
+    /** Auto add n units positions along z axis */
+    public static final String AUTO_ADD_N_Z_POS_PROP = "CX.addNZPos";
+
+
+    /** Auto add step size for matched index.<br>
+     * This is the interval at which an auto add instance should be placed.<br>
+     * <br>Using the existing step management algorithm, swap out this value for
+     * the step such that the number added will never exceed the step size
+     * required for safe placement and such that the total number will be
+     * evenly spaced over the maximum distance, which is:
+     * (parent dimension - autoAdd*Offset values).<br><br> This rule is ignored
+     * ignored if CX.autoAddByCol is specified. <br><br> However, if the distance
+     * between auto place items is greater than that specified by
+     * CX.autoAddStepSize when using CX.autoAddByCol then that should register
+     * as an illegal installation because it is unsafe. <br> In this case, do not
+     * add the parent or any of the children.*/
+
+    public static final String AUTO_ADD_STEP_SIZE = "CX.autoAddStepSize";
+
+
+    /** If set true, auto add is based on collision objects of the parent.
+     * CX.autoPlObj will still be referenced for what to place, but instead
+     * of using a specific span size, the collision position will be used. */
+    public static final String AUTO_ADD_BY_COL = "CX.autoAddByCol";
+
+    /** X, Y, or Z, determines the axis along which to auto add product  */
+    public static final String AUTO_ADD_AXIS = "CX.autoAddAxis";
+
+    /** Offset from negative axis direction end to place the end auto
+     * placement from (this is ignored if CX.autoAddByCol is specified)  */
+    public static final String AUTO_ADD_NEG_OFFSET = "CX.autoAddNegOffset";
+
+    /** Offset from positive axis direction end to place the end auto placement
+     * from (this is ignored if CX.autoAddByCol is specified)  */
+    public static final String AUTO_ADD_POS_OFFSET = "CX.autoAddPosOffset";
+
+
+
+    //---------------------------------------------------------------
+    // Positioning properties
+    //---------------------------------------------------------------
+
+    /**
+     * Specifies the maximum height the top edge of the item can occupy.
+     * Can be used to prevent unsafe installation over certain height
+     * and prevent stacking of more than n items based on non-adjustable
+     * heights if used correctly in conjunction with relationship rules.
+     */
+    public static final String MAXIMUM_HEIGHT_PLACE_PROP = "CX.maxHeight";
+
+    /**
+     * Specifies the collision objects to stack with if collision is found.
+     */
+    public static final String STACK_PROP = "CX.stack";
+
+    /**
+     * Child must fit inside parent at all times. Should not be used for
+     * anything that attaches to a wall. Only meant for product inside of
+     * product interactions.
+     */
+    public static final String MUST_FIT_INSIDE_PARENT = "CX.fitInParent";
+
+    //---------------------------------------------------------------
+    // Auto SKU Change properties
+    //---------------------------------------------------------------
+
+    /** Specifies if auto sku adjustment should occur */
+    public static final String PROD_SCALE_CHANGE_SKU_PROP = "CX.SKUChange";
+
+    /** Specifies SKU step matched x axis values */
+    public static final String PROD_SCALE_SKU_STEP_X_PROP = "CX.SKUStepX";
+
+    /** Specifies SKU step matched y axis values */
+    public static final String PROD_SCALE_SKU_STEP_Y_PROP = "CX.SKUStepY";
+
+    /** Specifies SKU step matched z axis values */
+    public static final String PROD_SCALE_SKU_STEP_Z_PROP = "CX.SKUStepZ";
+
+    /** Specifies SKU scale step sizes x axis */
+    public static final String PROD_SCALE_SIZE_STEP_X_PROP = "CX.SKUSizeX";
+
+    /** Specifies SKU scale step sizes y axis */
+    public static final String PROD_SCALE_SIZE_STEP_Y_PROP = "CX.SKUSizeY";
+
+    /** Specifies SKU scale step sizes z axis */
+    public static final String PROD_SCALE_SIZE_STEP_Z_PROP = "CX.SKUSizeZ";
+
+    /** Specifies SKU step descriptions matching x axis step */
+    public static final String PROD_SCALE_DESC_STEP_X_PROP = "CX.SKUDescX";
+
+    /** Specifies SKU step descriptions matching y axis step */
+    public static final String PROD_SCALE_DESC_STEP_Y_PROP = "CX.SKUDescY";
+
+    /** Specifies SKU step descriptions matching z axis step */
+    public static final String PROD_SCALE_DESC_STEP_Z_PROP = "CX.SKUDescZ";
+
+    //---------------------------------------------------------------
+    // Auto scale to fit (Hanger Bar example)
+    //---------------------------------------------------------------
+
+    /** Specifies auto scale span rule should occur */
+    public static final String SPAN_OBJECT_PROP = "CX.spanObjs";
+
+    /** Specifies offset from parent to use when auto span positioning */
+    public static final String SPAN_OBJECT_DEPTH_OFFSET_PROP =
+        "CX.spanDpthOfst";
+
+    //---------------------------------------------------------------
+    // Collision placement position rules
+    //---------------------------------------------------------------
+
+    /** Flags rule for execution */
+    public static final String COLLISION_POSITION_REQUIREMENTS = "CX.colPosReq";
+
+    /** X axis position values index ordered to match the relationship and amt order */
+    public static final String COLLISION_POSITION_X_AXIS_VALUES = "CX.colPosX";
+
+    /** Y axis position values index ordered to match the relationship and amt order */
+    public static final String COLLISION_POSITION_Y_AXIS_VALUES = "CX.colPosY";
+
+    /** Z axis position values index ordered to match the relationship and amt order */
+    public static final String COLLISION_POSITION_Z_AXIS_VALUES = "CX.colPosZ";
+
+    /** [0 - 1] inclusive tolerance values index ordered to match relationship
+     * and amount order
+     */
+    public static final String COLLISION_POSITION_TOLERANCE = "CX.colTol";
+
+    /** Axis allowed for adjustment of collision cases to align them for
+     * placement of the product.
+     */
+    public static final String COLLISION_TARGET_ADJUSTMENT_AXIS = "CX.colAdjAxis";
+
+    //---------------------------------------------------------------
+    // Permanent parent rules
+    //---------------------------------------------------------------
+
+    /** Flag permanent parent rule for execution */
+    public static final String USES_PERMANENT_PARENT = "CX.usePermParent";
+
+    /** Specifies the possible classifications that can be parented to */
+    public static final String ALLOWED_PARENT_CLASSIFICATIONS = "CX.allowedParentCl";
+
+       //---------------------------------------------------------------
+    // Scale Change Model Rules rules
+    //---------------------------------------------------------------
+
+    /**
+     * Determines whether or not the rule evaluates
+     */
+    public static final String SCALE_CHANGE_MODEL_FLAG = "CX.SKUX3DChange";
+
+    /**
+     * The axis the scale should occur on?
+     */
+    public static final String SCALE_CHANGE_MODEL_AXIS = "CX.SKUX3DAxis";
+
+    /**
+     * Size values to change models at ( actual sizes not increments)
+     */
+    public static final String SCALE_CHANGE_MODEL_SIZE = "CX.SKUX3DSize";
+    /**
+     *  alternate products to load up matched to size index
+     */
+    public static final String SCALE_CHANGE_MODEL_PROD = "CX.SKUX3DProd";
+    /*Boolean CX.SKUX3DChange - If true, causes rule to evaluate
+    Enum CX.SKUX3DAxis - X, Y or Z axis
+    float[] CX.SKUX3DSize - Size values to change models at
+    String[] CX.SKUX3DProd - alternate products to load up matched to size index*/
+
+    //---------------------------------------------------------------
+    // Catalog visibility
+    //---------------------------------------------------------------
+
+    /** Hides products with models in the catalog so the user can't add them */
+    public static final String HIDE_IN_CATALOG = "CX.hideInCatalog";
+
+    //---------------------------------------------------------------
+    // Dynamic orientation
+    //---------------------------------------------------------------
+
+    /** Flags a product as having orientation requirements to evaluate */
+    public static final String HAS_ORIENTATION_REQUIREMENTS = "CX.orienReq";
+
+    /** Flags existing orientation as left or right */
+    public static final String CURRENT_ORIENTATION = "CX.curOrient";
+
+    /** Ordered list of swap id's for orientation cases */
+    public static final String ORIENTATION_SWAP_ID_LIST = "CX.orienSwapLs";
+
+}

@@ -1,0 +1,1213 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2010
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+//External Imports
+
+//Internal Imports
+package org.chefx3d.rules.definitions;
+
+//External Imports
+import java.util.List;
+
+//Internal Imports
+import org.chefx3d.model.*;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+import org.chefx3d.tool.DefaultEntityBuilder;
+import org.chefx3d.tool.EntityBuilder;
+import org.chefx3d.tool.SimpleTool;
+
+
+/**
+* Shared routines related to auto place actions. All auto add rules extend
+* this class.
+*
+* @author Ben Yarger
+* @version $Revision: 1.35 $
+*/
+abstract class AutoAddRule extends SetRelativePositionRule {
+
+    private static final String LIST_PROPERTY_LABEL =
+        "org.chefx3d.tool.ToolSwitch.productChoicePropertyName";
+
+    /** Amount of buffered space to add to force fit adjustments */
+    private static final double FORCE_FIT_BUFFER = 0.002;
+
+    /** Maximum offset of a force fit allowed */
+    private static final double MAX_FORCE_FIT_OFFSET = 0.05;
+
+    /** Internal property to determine the end product's orientation */
+    protected static final String AUTO_ADD_END_ORIENTATION = "CX.aaEndOrient";
+
+    /**
+     * Orientation as either positive or negative. Default if for cases
+     * that require no orientation consideration.
+     */
+    protected static enum ORIENTATION {POSITIVE, NEGATIVE, DEFAULT};
+
+    /**
+     * Entity builder to create auto add entities
+     */
+    protected EntityBuilder entityBuilder;
+
+    /** Right border pos buffer value */
+    protected Float rightBorder;
+
+    /** Left border pos buffer value */
+    protected Float leftBorder;
+
+    /** Top border pos buffer value */
+    protected Float topBorder;
+
+    /** Bottom border pos buffer value */
+    protected Float bottomBorder;
+
+    /** Front border pos buffer value */
+    protected Float frontBorder;
+
+    /** Back border pos buffer value */
+    protected Float backBorder;
+
+    // TODO: as a singleton will this work right?
+    protected int suppressMovementID = -1;
+
+    /**
+     * Create the AddEntityChildCommand and apply it to the model.
+     *
+     * @param model WorldModel
+     * @param parentEntity Entity that is the parent
+     * @param parentEntityParentEntity parent entities parent entity
+     * @param simpleTool SimpleTool to create child
+     * @param pos double[3] Position of child
+     * @param rot float[4] Rotation of child
+     * @param addVaporEntities Adds the parentEntity as a ghost entity check
+     * during analysis
+     * @param boolean forceFit Forces extra calculation to attempt placement
+     * @param adjAxis axis to attempt forceFit adjustments along
+     * @param orientation Orientation to attempt to use
+     * @return AddEntityChildCommand or null if cannot legally add it
+     */
+    protected AddEntityChildCommand issueNewAddChildCommand(
+            WorldModel model,
+            Entity parentEntity,
+            Entity parentEntityParentEntity,
+            SimpleTool simpleTool,
+            double[] pos,
+            float[] rot,
+            boolean addVaporEntities,
+            boolean forceFit,
+            ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS adjAxis,
+            ORIENTATION orientation){
+        //System.out.println("********");
+        int entityID = model.issueEntityID();
+
+        if(entityBuilder == null){
+            entityBuilder = view.getEntityBuilder();
+        }
+
+        Entity newEntity = entityBuilder.createEntity(
+                model,
+                entityID,
+                pos,
+                rot,
+                simpleTool);
+
+
+        // Get the orientation specific version of the model
+        newEntity = getOrientatedModel(model, newEntity, orientation);
+
+        // clear out the 'bogus' property
+        newEntity.setProperty(
+                newEntity.getParamSheetName(),
+                Entity.SHADOW_ENTITY_FLAG,
+                false,
+                false);
+
+        // Set the is auto add flag
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.IS_AUTO_ADD_PRODUCT,
+                true,
+                false);
+
+        // Set the orientation
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                AutoAddRule.AUTO_ADD_END_ORIENTATION,
+                orientation,
+                false);
+
+        AddEntityChildCommand addChildCmd =
+            new AddEntityChildCommand(model, parentEntity, newEntity);
+
+        setRelativePosition(addChildCmd, model, pos);
+
+        ((PositionableEntity)newEntity).setPosition(
+                pos,
+                addChildCmd.isTransient());
+
+        /*
+         * Perform collision check here because multi command is sent back
+         * without any rule checking applied. We need to be sure that changes
+         * are legal before issuing the multi-command.
+         */
+        if(model.getEntity(parentEntity.getEntityID()) != null){
+            System.out.println("Normal add check collision method");
+            performCollisionCheck(addChildCmd);
+        } else {
+            System.out.println("Special add check collision method");
+            performSpecialAddCollisionCheck(model, parentEntityParentEntity, parentEntity, newEntity);
+        }
+
+        // As a safety net, make sure the parent entity exists in the
+        // collision results as we should always be adding on to a parent.
+        int parentEntityID = parentEntity.getEntityID();
+        boolean parentExists = false;
+
+        for (int i = 0; i < collisionEntities.size(); i++) {
+
+            if (collisionEntities.get(i).getEntityID() == parentEntityID) {
+                parentExists = true;
+            }
+        }
+
+        if (!parentExists) {
+
+            collisionEntities.add(parentEntity);
+        }
+
+        // Extract the relationship data
+        String[] classRelationship = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                newEntity,
+                ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+        int[] relationshipAmount = (int[])
+            RulePropertyAccessor.getRulePropertyValue(
+                newEntity,
+                ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP);
+
+        Enum[] relModifier = (Enum[])
+            RulePropertyAccessor.getRulePropertyValue(
+                newEntity,
+                ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP);
+
+        String[] classification = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                newEntity,
+                ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+
+        // If any of these are null, do not proceed with collision check
+        if(classRelationship == null ||
+                relationshipAmount == null ||
+                relModifier == null){
+            System.out.println("not all expected entity data was retrievable");
+            return null;
+        }
+
+        // Maximum index limit for loops
+        int maxIndex = Math.min(
+                (Math.min(classRelationship.length, relationshipAmount.length)),
+                relModifier.length);
+
+        if(addVaporEntities){
+            performCollisionAnalysis(
+                    classRelationship,
+                    classification,
+                    null,
+                    null,
+                    maxIndex,
+                    new Entity[] {parentEntity},
+                    true,
+                    null);
+            System.out.println("addVaporEntities analysis check");
+        } else {
+            performCollisionAnalysis(
+                    classRelationship,
+                    classification,
+                    null,
+                    null,
+                    maxIndex,
+                    null,
+                    true,
+                    null);
+            System.out.println("NON - addVaporEntities check");
+        }
+
+System.out.println("***Printing collision entities map");
+printCollisionEntitiesMap();
+System.out.println("***Printing collision entities list");
+printCollisionEntitiesList();
+
+        if(hasIllegalCollisions(classRelationship, relationshipAmount, relModifier)){
+            System.out.println("has illegal collisions");
+            if (forceFit) {
+
+                Entity[] vaporEntities = null;
+
+                if (addVaporEntities) {
+
+                    vaporEntities = new Entity[] {parentEntity};
+                }
+
+                if (!forceFitCommand(model, addChildCmd, adjAxis, vaporEntities)) {
+
+                    return null;
+                }
+
+            } else {
+
+                // EMF: there are illegal collisions, so try
+                // to add the next-smallest SKU item instead
+                return addNextSmallestSku(
+                    model,
+                    parentEntity,
+                    parentEntityParentEntity,
+                    simpleTool,
+                    pos,
+                    rot,
+                    addVaporEntities,
+                    adjAxis);
+            }
+        }
+
+        // Perform the add permanent parent rule analysis. If it comes back
+        // false we return null.
+        boolean permParentTest =
+            AddPermanentParentRule.getInstance().performCheck(
+                    addChildCmd.getEntity(),
+                    model,
+                    addChildCmd);
+
+        if (!permParentTest) {
+            return null;
+        }
+
+        /*
+         * Perform segment bounds check here because multi-command issued will
+         * bypass the rules.
+         */
+        return addChildCmd;
+    }
+
+
+    /**
+     * If a full length standard cannot fit because of collision with
+     * another product, we need to attempt to place the next smallest
+     * size standard. In other words, if a product being added cannot
+     * fit because of collisions but it uses this rule, attempt to use
+     * the next smaller size until no smaller sizes are available to
+     * try or a fit was found.
+     *
+     * @author Eric Fickenscher
+     * @param model WorldModel
+     * @param parentEntity Entity that is the parent
+     * @param parentEntityParentEntity parent entities parent entity
+     * @param simpleTool SimpleTool to create child
+     * @param pos double[3] Position of child
+     * @param rot float[4] Rotation of child
+     * @param addVaporEntities Adds the parentEntity as a ghost entity check
+     * during analysis
+     * @return AddEntityChildCommand or null if cannot legally add it
+     */
+    private AddEntityChildCommand addNextSmallestSku(
+            WorldModel model,
+            Entity parentEntity,
+            Entity parentEntityParentEntity,
+            SimpleTool simpleTool,
+            double[] pos,
+            float[] rot,
+            boolean addVaporEntities,
+            ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS adjAxis){
+
+
+        Boolean skuX3DChange = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                simpleTool,
+                ChefX3DRuleProperties.SCALE_CHANGE_MODEL_FLAG);
+
+        // Boolean CX.SKUX3DChange - If true, causes rule to evaluate
+        if( skuX3DChange == null || !skuX3DChange )
+            return null;
+
+
+        //
+        // Grab the size of the current simpleTool along the relevant axis
+        // look at Enum CX.SKUX3DAxis - X, Y or Z axis
+        // and then grab the appropriate dimension from simpleTool.getSize()
+        //
+        Enum skuX3DAxis = (Enum)
+            RulePropertyAccessor.getRulePropertyValue(
+                    simpleTool,
+                    ChefX3DRuleProperties.SCALE_CHANGE_MODEL_AXIS);
+
+
+        float[] simpleToolSize = simpleTool.getSize();
+        float currentSize = 0;
+
+        switch( (ChefX3DRuleProperties.SCALE_CHANGE_MODEL_AXIS_VALUES)skuX3DAxis ){
+
+        case XAXIS:
+            currentSize = simpleToolSize[0];
+            break;
+
+        case YAXIS:
+            currentSize = simpleToolSize[1];
+            break;
+
+        case ZAXIS:
+            currentSize = simpleToolSize[2];
+            break;
+        }
+
+        //
+        // we have a collision with the current length.
+        // try and find a shorter object to take the currentTool's place by
+        // iterating through the float[] array CX.SKUX3DSize
+        //
+        float[] skuX3DSize = (float[])
+            RulePropertyAccessor.getRulePropertyValue(
+                simpleTool,
+                ChefX3DRuleProperties.SCALE_CHANGE_MODEL_SIZE);
+
+        // index to the longest SKU that is shorter than current
+        int indexToNextShortestSku = -1;
+        // length of longest SKU that is shorter than current
+        float nextShortestSize = -Float.MAX_VALUE;
+
+
+        for( int i = 0; i < skuX3DSize.length; i++ ){
+
+            if(skuX3DSize[i] < currentSize &&
+               skuX3DSize[i] > nextShortestSize ){
+                    nextShortestSize = skuX3DSize[i];
+                    indexToNextShortestSku = i;
+            }
+        }
+
+        // if no items exist shorter than current, we can't place the object!
+        if( indexToNextShortestSku < 0 )
+            return null;
+
+
+        // alternate products to load up matched to size index
+        String[] skuX3DProd = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                simpleTool,
+                ChefX3DRuleProperties.SCALE_CHANGE_MODEL_PROD);
+
+
+        //
+        // create a new tool based on the index to
+        // the longest SKU shorter than current
+        //
+        SimpleTool newSimpleTool =
+            getSimpleToolByName(skuX3DProd[indexToNextShortestSku]);
+
+        String iconUrl = newSimpleTool.getIcon();
+
+        if(iconUrl == null || iconUrl.equals("")) {
+            iconUrl = simpleTool.getIcon();
+            newSimpleTool.setIcon(null, iconUrl);
+        }
+
+
+
+        //issue new add child command
+        return issueNewAddChildCommand(
+            model,
+            parentEntity,
+            parentEntityParentEntity,
+            newSimpleTool,
+            pos,
+            rot,
+            addVaporEntities,
+            false,
+            adjAxis,
+            ORIENTATION.DEFAULT);
+    }
+
+
+    /**
+     * Create the appropriate move command and apply it to the model. Parent is
+     * always the product that auto placed this product being moved. Thus
+     * no need to issue TransitionEntityChildCommand.
+     *
+     * @param model WorldModel to reference
+     * @param entity Entity to move
+     * @param pos Position to move entity to
+     * @param isTransient Is transient state
+     * @param forceFit Perform extra calculations to place product
+     * @param adjAxis Axis to perform forceFit adjustments along
+     * @return Command Either MoveEntityCommand or MoveEntityTransientCommand
+     * or null if there are illegal collisions
+     */
+    protected Command issueMoveCommand(
+            WorldModel model,
+            Entity entity,
+            double[] pos,
+            boolean isTransient,
+            boolean forceFit,
+            ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS adjAxis){
+
+        int transactionID = model.issueTransactionID();
+
+
+   System.out.println("Moving entity: " + entity);
+
+        if(isTransient){
+
+            MoveEntityTransientCommand mvCmd =
+                new MoveEntityTransientCommand(
+                        model,
+                        transactionID,
+                        entity.getEntityID(),
+                        pos,
+                        new float[] {0.0f, 0.0f, 0.0f});
+
+            setRelativePosition(mvCmd, model, pos);
+
+            mvCmd.setPosition(pos);
+
+            // Perform collision check here because multi command is sent back
+            // without any rule checking applied. We need to be sure that changes
+            // are legal before issuing the multi-command.
+            performCollisionCheck(mvCmd);
+
+            // As a safety net, make sure the parent entity exists in the
+            // collision results as we should always be adding on to a parent.
+            int parentEntityID = entity.getParentEntityID();
+            Entity parentEntity = model.getEntity(parentEntityID);
+            boolean parentExists = false;
+
+            for (int i = 0; i < collisionEntities.size(); i++) {
+
+                if (collisionEntities.get(i).getEntityID() == parentEntityID) {
+                    parentExists = true;
+                }
+            }
+
+            if (!parentExists) {
+
+                collisionEntities.add(parentEntity);
+            }
+
+            // Extract the relationship data
+            String[] classRelationship = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+            int[] relationshipAmount = (int[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP);
+
+            Enum[] relModifier = (Enum[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP);
+
+            String[] classification = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+            // If any of these are null, do not proceed with collision check
+            if(classRelationship == null ||
+                    relationshipAmount == null ||
+                    relModifier == null){
+
+                return null;
+            }
+
+            // Maximum index limit for loops
+            int maxIndex = Math.min(
+                    (Math.min(classRelationship.length, relationshipAmount.length)),
+                    relModifier.length);
+
+            performCollisionAnalysis(
+                    classRelationship,
+                    classification,
+                    null,
+                    null,
+                    maxIndex,
+                    null,
+                    true,
+                    null);
+
+            if(hasIllegalCollisions(classRelationship, relationshipAmount, relModifier)){
+
+                if (forceFit) {
+
+                    if (!forceFitCommand(model, mvCmd, adjAxis, null)) {
+
+                        return null;
+                    }
+
+                } else {
+System.out.println("   Has illegal");
+printCollisionEntitiesMap();
+printCollisionEntitiesList();
+
+                    return null;
+                }
+            }
+
+            /*
+             * Perform segment bounds check here because multi-command issued will
+             * bypass the rules.
+             */
+            //System.out.println("done");
+            return mvCmd;
+
+        } else {
+            //System.out.println("non transient move command");
+            double[] startingPosition = new double[3];
+            ((PositionableEntity)entity).getStartingPosition(startingPosition);
+
+            MoveEntityCommand mvCmd =
+                new MoveEntityCommand(
+                        model,
+                        transactionID,
+                        entity.getEntityID(),
+                        pos,
+                        startingPosition);
+
+            setRelativePosition(mvCmd, model, pos);
+
+            mvCmd.setEndPosition(pos);
+
+            /*
+             * Perform collision check here because multi command is sent back
+             * without any rule checking applied. We need to be sure that changes
+             * are legal before issuing the multi-command.
+             */
+            performCollisionCheck(mvCmd);
+
+            // Extract the relationship data
+            String[] classRelationship = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+            int[] relationshipAmount = (int[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP);
+
+            Enum[] relModifier = (Enum[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP);
+
+            String[] classification = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+            // If any of these are null, do not proceed with collision check
+            if(classRelationship == null ||
+                    relationshipAmount == null ||
+                    relModifier == null){
+
+                return null;
+            }
+
+            // Maximum index limit for loops
+            int maxIndex = Math.min(
+                    (Math.min(classRelationship.length, relationshipAmount.length)),
+                    relModifier.length);
+
+            performCollisionAnalysis(
+                    classRelationship,
+                    classification,
+                    null,
+                    null,
+                    maxIndex,
+                    null,
+                    true,
+                    null);
+
+            if(hasIllegalCollisions(classRelationship, relationshipAmount, relModifier)){
+                System.out.println("  has illegal collisions");
+                if (forceFit) {
+
+                    if (!forceFitCommand(model, mvCmd, adjAxis, null)) {
+
+                        return null;
+                    }
+
+                } else {
+
+                    return null;
+                }
+            }
+
+            /*
+             * Perform segment bounds check here because multi-command issued will
+             * bypass the rules.
+             */
+            //System.out.println("move");
+            return mvCmd;
+        }
+    }
+
+    /**
+     * Create the remove command to remove the auto add child from the parent.
+     *
+     * @param model
+     * @param parentEntity
+     * @param childEntity
+     * @return RemoveEntityChildCommand
+     */
+    protected RemoveEntityChildTransientCommand issueDeleteCommand(
+            WorldModel model,
+            Entity parentEntity,
+            Entity childEntity){
+
+System.out.println("Deleting entity: " + childEntity);
+        RemoveEntityChildTransientCommand rmvCmd =
+            new RemoveEntityChildTransientCommand(model, parentEntity, childEntity);
+
+        return rmvCmd;
+    }
+
+    /**
+     * Generate remove command for existing switch tool entity instance.
+     *
+     * @param model WorldModel
+     * @param entity Entity to check for switch tool case
+     * @return RemoveEntityChildCommand or null if not generated
+     */
+    protected RemoveEntityChildTransientCommand removeSwitchToolEntityInstance(
+            WorldModel model,
+            Entity entity){
+
+        String propertyLabel =
+            intl_mgr.getString(LIST_PROPERTY_LABEL);
+
+        ListProperty listProperty =
+            (ListProperty) entity.getProperty(
+                    Entity.EDITABLE_PROPERTIES,
+                    propertyLabel);
+
+        RemoveEntityChildTransientCommand rmvCmd = null;
+
+        if(listProperty != null){
+
+            Entity existingEntity = model.getEntity(entity.getEntityID());
+
+            if(existingEntity != null){
+                int parentID = existingEntity.getParentEntityID();
+                Entity parentEntity = model.getEntity(parentID);
+                rmvCmd = issueDeleteCommand(model, parentEntity, entity);
+            }
+        }
+
+        return rmvCmd;
+    }
+
+    /**
+     * Pull the border position buffer data for the entity and set the
+     * protected class fields.
+     *
+     * @param entity Entity
+     */
+    protected void pullBorderBufferValues(Entity entity){
+
+        rightBorder = (Float)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RIGHT_POS_BUFFER_PROP);
+
+        leftBorder = (Float)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.LEFT_POS_BUFFER_PROP);
+
+        topBorder = (Float)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.TOP_POS_BUFFER_PROP);
+
+        bottomBorder = (Float)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.BOTTOM_POS_BUFFER_PROP);
+
+        frontBorder = (Float)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.FRONT_POS_BUFFER_PROP);
+
+        backBorder = (Float)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.BACK_POS_BUFFER_PROP);
+
+        if(rightBorder == null){
+            rightBorder = 0.0f;
+        }
+
+        if(leftBorder == null){
+            leftBorder = 0.0f;
+        }
+
+        if(topBorder == null){
+            topBorder = 0.0f;
+        }
+
+        if(bottomBorder == null){
+            bottomBorder = 0.0f;
+        }
+
+        if(frontBorder == null){
+            frontBorder = 0.0f;
+        }
+
+        if(backBorder == null){
+            backBorder = 0.0f;
+        }
+    }
+
+    /**
+     * Confirms if the child is an auto place entity of the parent.
+     *
+     * @param child Child entity to confirm
+     * @param parent Parent entity to check against
+     * @return True if it is an auto add entity, false otherwise
+     */
+    protected boolean isAutoAddChild(Entity child, Entity parent){
+
+        String[] autoPlaceObjectsProp = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    parent,
+                    ChefX3DRuleProperties.AUTO_PLACE_OBJECTS_PROP);
+
+        if(autoPlaceObjectsProp != null && autoPlaceObjectsProp.length > 0){
+
+            String toolID = child.getToolID();
+
+            for(int i = 0; i < autoPlaceObjectsProp.length; i++){
+
+                if(toolID.equals(autoPlaceObjectsProp[i])){
+
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Piggy-back on the (SegmentEdgeEntityOrientationRule) for swapping
+     * between specific positive and negative orientation models. Use our
+     * own specific ORIENTATION value to get exactly what we want back.
+     *
+     * If we can't get a new model back, then we return the entity that
+     * came in as the parameter.
+     *
+     * @param model WorldModel to reference
+     * @param entity Entity to attempt to swap
+     * @param orientation Orientation flag
+     * @return Entity, either the orientation specific or the entity parameter
+     * if unable to find orientation specific alternate.
+     */
+    protected Entity getOrientatedModel(
+            WorldModel model,
+            Entity entity,
+            ORIENTATION orientation) {
+
+        // Make sure we get the expected list of ids - should be length 2
+        String[] swapIDList = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.ORIENTATION_SWAP_ID_LIST);
+
+        if(swapIDList == null || swapIDList.length != 2){
+            return entity;
+        }
+
+        // Extract the appropriate toolID based on value of changeToState
+        String toolID;
+
+        switch(orientation){
+
+            case NEGATIVE:
+                toolID = swapIDList[0];
+                break;
+
+            case POSITIVE:
+                toolID = swapIDList[1];
+                break;
+
+            default:
+                return entity;
+        }
+
+        // Get the tool
+        SimpleTool tool =
+            (SimpleTool) catalogManager.findTool(toolID);
+
+        if(tool == null || tool.getToolID().equals(toolID)){
+            return entity;
+        }
+
+        // Get the current position
+        if(!(entity instanceof PositionableEntity)){
+            return entity;
+        }
+
+        double[] position = new double[] {0, 0, 0};
+
+        PositionableEntity posEntity = (PositionableEntity)entity;
+        posEntity.getPosition(position);
+
+        // Create the new entity
+        EntityBuilder entityBuilder =
+            view.getEntityBuilder();
+
+        Entity newEntity =
+            entityBuilder.createEntity(
+                    model,
+                    model.issueEntityID(),
+                    position,
+                    new float[] {0.0f, 1.0f, 0.0f, 0.0f},
+                    tool);
+
+        if (newEntity == null) {
+            return entity;
+        }
+
+        // Tell the entity which orientation it is
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                AutoAddRule.AUTO_ADD_END_ORIENTATION,
+                orientation,
+                false);
+
+
+        return newEntity;
+
+    }
+
+    //--------------------------------------------------------------------
+    // Private methods
+    //--------------------------------------------------------------------
+
+    /**
+     * Attempts to place the entity to the positive and negative side of the
+     * collective collision set and will attempt to do so along the adjustment
+     * axis assigned. Applied as an alternate place during auto add if the
+     * force fit rule flag is set.
+     *
+     * @param model WorldModel to reference
+     * @param Command Command to process force fit on
+     * @param adjAxis Axis to process the force fit along
+     * @param vaporEntities Entities, not yet added, to consider for collision
+     * @return True if fit was made, false if not
+     */
+    private boolean forceFitCommand(
+            WorldModel model,
+            Command command,
+            ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS adjAxis,
+            Entity[] vaporEntities) {
+
+        // Get the entity, and if we don't find it return false
+        Entity entity = null;
+
+        if (command instanceof AddEntityChildCommand) {
+
+            entity = ((AddEntityChildCommand)command).getEntity();
+
+        } else if (command instanceof AddEntityChildTransientCommand) {
+
+            entity = ((AddEntityChildTransientCommand)command).getEntity();
+
+        } else if (command instanceof MoveEntityCommand) {
+
+            entity = ((MoveEntityCommand)command).getEntity();
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            return true;
+
+        } else {
+
+            return true;
+        }
+
+        // Validate extracted data
+        if (entity == null) {
+            return false;
+        }
+
+        if (!(entity instanceof PositionableEntity)) {
+            return false;
+        }
+
+        PositionableEntity posEntity = (PositionableEntity) entity;
+
+        // Get the illegal collisions and determine the bounds of the illegal
+        // collision set. Then try placing to the right, and then left if
+        // right doesn't work.
+        float[] multiBounds = new float[6];
+        double[] multiCenter = new double[3];
+
+        getMultiBounds(model, multiBounds, multiCenter, illegalEntities);
+
+
+        // Establish the first and second attempt positions.
+        // First attempt pos is always in the positive direction
+        // Second attempt pos is always in the negative direction
+        double[] firstAttemptPos = new double[3];
+        double[] secondAttemptPos = new double[3];
+
+        float[] bounds = new float[6];
+
+        double[] currentPos = new double[3];
+        double[] endPos = new double[3];
+
+        // Prepare values for analysis
+        if (command instanceof MoveEntityCommand) {
+
+            ((MoveEntityCommand)command).getEndPosition(endPos);
+            ((PositionableEntity)entity).getPosition(currentPos);
+            ((PositionableEntity)entity).setPosition(endPos, false);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            ((MoveEntityTransientCommand)command).getPosition(endPos);
+            ((PositionableEntity)entity).getPosition(currentPos);
+            ((PositionableEntity)entity).setPosition(endPos, false);
+
+        }
+
+        // Need to get the zone relative position to compare apples and
+        // apples with the multi bounds results
+        double[] zoneRelativePos = new double[3];
+
+        Entity parentZoneEntity = getParentZoneEntity(model, entity);
+        zoneRelativePos =
+            getRelativePosition(model, entity, parentZoneEntity, false);
+
+        // Reset values to before analysis state
+        ((PositionableEntity)entity).setPosition(currentPos, false);
+
+        // Continue processing
+        posEntity.getBounds(bounds);
+
+        secondAttemptPos[0] = firstAttemptPos[0] = endPos[0];
+        secondAttemptPos[1] = firstAttemptPos[1] = endPos[1];
+        secondAttemptPos[2] = firstAttemptPos[2] = endPos[2];
+
+        // flag which cases to process
+        // if either are false it is because the bounds issue has been violated
+        boolean tryFirstAttempt = true;
+        boolean trySecondAttempt = true;
+
+        // Process axis cases.
+        switch(adjAxis) {
+
+        case XAXIS:
+
+            double leftMultiBounds = multiCenter[0] + multiBounds[0];
+            double rightMultiBounds = multiCenter[0] + multiBounds[1];
+
+            double leftEntityBounnds = zoneRelativePos[0] + bounds[0];
+            double rightEntityBounds = zoneRelativePos[0] + bounds[1];
+
+            firstAttemptPos[0] =
+                firstAttemptPos[0] +
+                (rightMultiBounds - leftEntityBounnds) +
+                FORCE_FIT_BUFFER;
+
+            secondAttemptPos[0] =
+                secondAttemptPos[0] -
+                (rightEntityBounds - leftMultiBounds) -
+                FORCE_FIT_BUFFER;
+
+            if (Math.abs(firstAttemptPos[0] - endPos[0]) >
+            MAX_FORCE_FIT_OFFSET) {
+
+                tryFirstAttempt = false;
+
+            }
+
+            if (Math.abs(endPos[0] - secondAttemptPos[0]) >
+            MAX_FORCE_FIT_OFFSET) {
+
+                trySecondAttempt = false;
+            }
+
+            break;
+
+        case YAXIS:
+
+            double downMultiBounds = multiCenter[1] + multiBounds[2];
+            double upMultiBounds = multiCenter[1] + multiBounds[3];
+
+            double downEntityBounds = zoneRelativePos[1] + bounds[2];
+            double upEntityBounds = zoneRelativePos[1] + bounds[3];
+
+            firstAttemptPos[1] =
+                firstAttemptPos[1] +
+                (upMultiBounds - downEntityBounds) +
+                FORCE_FIT_BUFFER;
+
+            secondAttemptPos[1] =
+                secondAttemptPos[1] -
+                (upEntityBounds - downMultiBounds) -
+                FORCE_FIT_BUFFER;
+
+            if (Math.abs(firstAttemptPos[1] - endPos[1]) >
+            MAX_FORCE_FIT_OFFSET) {
+
+                tryFirstAttempt = false;
+
+            }
+
+            if (Math.abs(endPos[1] - secondAttemptPos[1]) >
+            MAX_FORCE_FIT_OFFSET) {
+
+                trySecondAttempt = false;
+            }
+
+            break;
+
+        case ZAXIS:
+
+            double backMultiBounds = multiCenter[2] + multiBounds[4];
+            double frontMultiBounds = multiCenter[2] + multiBounds[5];
+
+            double backEntityBounds = zoneRelativePos[2] + bounds[4];
+            double frontEntityBounds = zoneRelativePos[2] + bounds[5];
+
+            firstAttemptPos[2] =
+                firstAttemptPos[2] +
+                (frontMultiBounds - backEntityBounds) +
+                FORCE_FIT_BUFFER;
+
+            secondAttemptPos[2] =
+                secondAttemptPos[2] -
+                (frontEntityBounds - backMultiBounds) -
+                FORCE_FIT_BUFFER;
+
+            if (Math.abs(firstAttemptPos[2] - endPos[2]) >
+            MAX_FORCE_FIT_OFFSET) {
+
+                tryFirstAttempt = false;
+
+            }
+
+            if (Math.abs(endPos[2] - secondAttemptPos[2]) >
+            MAX_FORCE_FIT_OFFSET) {
+
+                trySecondAttempt = false;
+            }
+
+            break;
+        }
+
+
+        // If first attempt should be made do it here
+        if (tryFirstAttempt) {
+
+            // Perform first attempt test
+            if (command instanceof AddEntityChildCommand) {
+
+                posEntity.setPosition(firstAttemptPos, false);
+
+            } else if (command instanceof AddEntityChildTransientCommand) {
+
+                posEntity.setPosition(firstAttemptPos, false);
+
+            } else if (command instanceof MoveEntityCommand) {
+
+                ((MoveEntityCommand)command).setEndPosition(firstAttemptPos);
+
+            } else if (command instanceof MoveEntityTransientCommand) {
+
+                ((MoveEntityTransientCommand)command).setPosition(firstAttemptPos);
+
+            }
+
+            performCollisionCheck(command);
+
+            performCollisionAnalysisHelper(entity, vaporEntities, true, null, true);
+
+            // If there are no illegal collisions then we have success
+            if(!hasIllegalCollisionHelper(entity)){
+
+                return true;
+            }
+
+        }
+
+        // If second attempt should be made, do it here
+        if (trySecondAttempt) {
+            // Perform second attempt test
+            if (command instanceof AddEntityChildCommand) {
+
+                posEntity.setPosition(secondAttemptPos, false);
+
+            } else if (command instanceof AddEntityChildTransientCommand) {
+
+                posEntity.setPosition(secondAttemptPos, false);
+
+            } else if (command instanceof MoveEntityCommand) {
+
+                ((MoveEntityCommand)command).setEndPosition(secondAttemptPos);
+
+            } else if (command instanceof MoveEntityTransientCommand) {
+
+                ((MoveEntityTransientCommand)command).setPosition(secondAttemptPos);
+
+            }
+
+            performCollisionCheck(command);
+
+            performCollisionAnalysisHelper(entity, vaporEntities, true, null, true);
+
+            // If there are no illegal collisions, then we have success
+            if(!hasIllegalCollisionHelper(entity)){
+
+                return true;
+            }
+        }
+
+        // Could not force fit it, so revert value
+        if (command instanceof AddEntityChildCommand) {
+
+            posEntity.setPosition(endPos, false);
+
+        } else if (command instanceof AddEntityChildTransientCommand) {
+
+            posEntity.setPosition(endPos, false);
+
+        } else if (command instanceof MoveEntityCommand) {
+
+            ((MoveEntityCommand)command).setEndPosition(endPos);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            ((MoveEntityTransientCommand)command).setPosition(endPos);
+
+        }
+
+        return false;
+    }
+
+}

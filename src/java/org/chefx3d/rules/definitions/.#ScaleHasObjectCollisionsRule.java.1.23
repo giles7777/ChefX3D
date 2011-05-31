@@ -1,0 +1,141 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+
+//Internal Imports
+import org.chefx3d.model.Command;
+import org.chefx3d.model.Entity;
+import org.chefx3d.model.ScaleEntityCommand;
+import org.chefx3d.model.PositionableEntity;
+import org.chefx3d.model.WorldModel;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+
+/**
+* Determines if Entity is colliding with other objects.
+*
+* @author Ben Yarger
+* @version $Revision: 1.23 $
+*/
+public class ScaleHasObjectCollisionsRule extends Rule{
+
+    /** Static class instance */
+    private static ScaleHasObjectCollisionsRule rule =
+        new ScaleHasObjectCollisionsRule();
+
+    /** Status message when mouse button released and collisions exist */
+    private static final String SCALE_COL_PROP =
+        "org.chefx3d.rules.definitions.ScaleHasObjectCollisionsRule.cannotScale";
+
+    /** Status message when illegal collisions exist for scale commands */
+    private static final String SCALE_TRANS_COL_PROP =
+        "org.chefx3d.rules.definitions.ScaleHasObjectCollisionsRule.collisionsExist";
+
+    /** Private constructor. All Rule classes should be implemented this way. */
+    private ScaleHasObjectCollisionsRule(){
+
+        ruleType = RULE_TYPE.INVIOLABLE;
+    }
+
+    /**
+     * Return class instance
+     * @return SnapToRotationValueRule
+     */
+    public static ScaleHasObjectCollisionsRule getInstance(){
+        return rule;
+    }
+
+    /**
+     * Check if the Entity collides with objects.
+     *
+     * @param entity Entity object
+     * @param model WorldModel object
+     * @param command Command object
+     * @return boolean True if collisions exist, false otherwise
+     */
+    @Override
+    protected boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command) {
+
+        /*
+         * Perform collision check - initial point at which a check should
+         * be performed for scale rules.
+         */
+        performExtendedCollisionCheck(command);
+
+        // If collisionEntities is null (no collisions occurred) then return false
+        if(collisionEntitiesMap == null){
+
+            return false;
+        }
+
+        // Debug
+        //printCollisionEntitiesMap();
+
+        // Perform collision analysis
+        performExtendedCollisionAnalysisHelper(null, false, null);
+
+        /*
+         * If we are colliding with objects not in the relationship
+         * classification specified, illegal collisions exist.
+         */
+        if(hasIllegalCollisionExtendedHelper()){
+
+            if(command instanceof ScaleEntityCommand){
+
+                resetToOriginalScale(
+                        (ScaleEntityCommand) command,
+                        (PositionableEntity)entity);
+
+                String msg = intl_mgr.getString(SCALE_COL_PROP);
+                popUpMessage.showMessage(msg);
+
+            } else {
+
+                String msg = intl_mgr.getString(SCALE_TRANS_COL_PROP);
+                statusBar.setMessage(msg);
+            }
+            return true;
+        }
+
+        return false;
+    }
+
+    //---------------------------------------------------------------
+    // Local methods
+    //---------------------------------------------------------------
+
+    /**
+     * Resets the entity back to the last known good scale.
+     *
+     * @param mvCommand RotateEntityCommand causing the entity to move
+     * @param posEntity PositionableEntity
+     */
+    private void resetToOriginalScale(
+            ScaleEntityCommand cmd,
+            PositionableEntity posEntity){
+
+        double[] startPos = new double[3];
+        float[] startingScale = new float[3];
+
+        cmd.getOldScale(startingScale);
+        cmd.getOldPosition(startPos);
+        cmd.setNewPosition(startPos);
+        cmd.setNewScale(startingScale);
+
+        //this.addNewlyIssuedCommand(cmd);
+    }
+}

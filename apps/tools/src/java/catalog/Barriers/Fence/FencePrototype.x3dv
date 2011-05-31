@@ -1,0 +1,94 @@
+#X3D V3.0 utf8
+
+PROFILE Immersive
+
+PROTO GeometryHolder [
+   inputOutput SFString name ""
+   inputOutput SFInt32 geometryType 0    # 0 = IndexedTriangleSet
+   inputOutput MFVec3f coord []
+   inputOutput MFVec2f texCoord []
+   inputOutput MFVec3f normal []
+   inputOutput MFInt32 index []
+   inputOutput SFNode appearance NULL
+]
+{
+   WorldInfo {} 
+}
+
+PROTO Fence [
+   initializeOnly SFInt32 fencesPerShape 2      # Must evenly divide into the number right now
+   initializeOnly MFVec3f start []
+   initializeOnly MFVec3f end []
+   initializeOnly MFFloat panelHeight []
+   initializeOnly MFFloat panelTopHeight []
+   initializeOnly MFBool panelSpan []   
+   initializeOnly MFInt32 postType []                 # Index into postGeometry
+   initializeOnly MFInt32 postTopType []              # Index into postGeometry
+   initializeOnly MFVec3f postSize []
+   initializeOnly MFVec3f postTopSize []
+   initializeOnly MFBool postBraced []   
+   initializeOnly MFNode postGeometry []        # 1,1,1 sized geometry for a post
+   initializeOnly MFNode postTopGeometry []     # 1,1,1 sized geometry for a post Top
+   initializeOnly SFInt32 panelAppearance 0     # What appearance should all the panels have
+   initializeOnly SFInt32 panelTopAppearance 0  # What appearance should all the panel Tops have
+   initializeOnly SFInt32 panelRailAppearance 0  # What appearance should all the rails have
+   initializeOnly SFInt32 postAppearance 0      # What appearance should all the posts have
+   initializeOnly SFInt32 postTopAppearance 0   # What appearance should all the post Tops have
+   initializeOnly MFNode appearance []          # Array of appearances to reuse
+
+   # Unsupported currently   
+   initializeOnly MFInt32 panelRailType []
+   initializeOnly MFFloat panelRailHeight []
+   initializeOnly MFInt32 panelRailCount []
+   initializeOnly MFFloat panelOverhang []
+   initializeOnly MFFloat panelRaisedHeight []
+   initializeOnly SFBool stepped FALSE   
+   
+] {
+   DEF HOLDER Transform {
+      children [Shape {
+         geometry IndexedTriangleSet {
+               solid FALSE
+               index [0 1 2 1 3 2]
+            coord DEF COORD Coordinate {
+                  point [0.0 1.0 0.0 ,0.0 0.0 0.0 ,1.0 1.0 0.0 ,1.0 0.0 0.0]
+            }
+
+            normal Normal {
+                  vector [0.0 0.0 1.0 ,0.0 0.0 1.0 ,0.0 0.0 1.0 ,0.0 0.0 1.0]
+            }
+
+            texCoord TextureCoordinate {
+                  point [0.0 0.0 ,0.0 1.0 ,1.0 0.0 ,1.0 1.0]
+            }
+
+         }
+
+      }
+      ]
+   }
+   DEF SCRIPT Script {
+         initializeOnly SFInt32 fencesPerShape IS fencesPerShape
+         initializeOnly MFFloat panelHeight IS panelHeight
+         initializeOnly MFFloat panelTopHeight IS panelTopHeight
+         initializeOnly MFVec3f start IS start
+         initializeOnly MFVec3f end IS end
+         initializeOnly MFInt32 postType IS postType
+         initializeOnly MFInt32 postTopType IS postTopType
+         initializeOnly MFVec3f postSize IS postSize
+         initializeOnly MFVec3f postTopSize IS postTopSize
+         initializeOnly MFNode postGeometry IS postGeometry
+         initializeOnly MFNode postTopGeometry IS postTopGeometry
+         
+         initializeOnly SFInt32 panelAppearance IS panelAppearance
+         initializeOnly SFInt32 panelTopAppearance IS panelTopAppearance
+         initializeOnly SFInt32 postAppearance IS postAppearance
+         initializeOnly SFInt32 postTopAppearance IS postTopAppearance
+         initializeOnly SFInt32 panelRailAppearance IS panelRailAppearance
+         initializeOnly MFNode appearance IS appearance
+         
+         outputOnly MFNode children
+         url ["classes/catalog.Barriers.Fence.Fence.class"]
+   }
+   ROUTE SCRIPT.children TO HOLDER.set_children
+}

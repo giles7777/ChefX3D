@@ -1,0 +1,29 @@
+#*********************************************************************
+#
+#  (C) 2001-02 Yumetech, Inc
+#    http://www.yumetech.com/
+#
+# Package makefile producing chefx3d.jar
+#
+# Author: Justin Couch
+# Version: $Revision: 1.5 $
+#
+#*********************************************************************
+
+# Describe every directory that you want included in the JAR file here.
+# This is not recursive, so if you want parent directory and the
+# sub-directory, say so. These directories should not have '/' appended.
+JAR_CONTENT=org/chefx3d \
+  org/chefx3d/tool \
+  org/chefx3d/toolbar \
+  org/chefx3d/view \
+  org/chefx3d/util \
+  org/chefx3d/model \
+  org/chefx3d/catalog \
+  org/chefx3d/catalog/util \
+  config/i18n
+
+# Manifest file name. Stored in the make/manifest directory
+MANIFEST=chefx3d_core.mf
+
+include ${PROJECT_ROOT}/make/Makefile.jav

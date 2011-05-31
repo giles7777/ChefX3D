@@ -1,0 +1,27 @@
+#*********************************************************************
+#
+#  (C) 2001-02 Web3d Consortium
+#    http://www.web3d.org/
+#
+# Package makefile producing xj3d_browser.jar
+#
+# Author: Alan Hudson
+# Version: $Revision: 1.1 $
+#
+#*********************************************************************
+
+# Describe every directory that you want included in the JAR file here.
+# This is not recursive, so if you want parent directory and the
+# sub-directory, say so. These directories should not have '/' appended.
+JAR_CONTENT= \
+	demos \
+	images/2d
+	
+# Manifest file name. Stored in the make/manifest directory
+MANIFEST=chefx3d_demos.mf
+
+# Extra files that are sourced from the root src directory. Typically
+# a global property file
+EXTRA_FILES=
+
+include ${PROJECT_ROOT}/make/Makefile.jav

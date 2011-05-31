@@ -1,0 +1,117 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 3.0//EN" "http://www.web3d.org/specifications/x3d-3.0.dtd">
+<X3D profile='Immersive' version='3.0'>
+<head>
+</head>
+<Scene>
+   <ProtoDeclare name='GeometryHolder'>
+      <ProtoInterface>
+         <field accessType='inputOutput' type='SFString' name='name' value=''></field>
+         <field accessType='inputOutput' type='SFInt32' name='geometryType' value='0'></field>
+         <field accessType='inputOutput' type='MFVec3f' name='coord'></field>
+         <field accessType='inputOutput' type='MFVec2f' name='texCoord'></field>
+         <field accessType='inputOutput' type='MFVec3f' name='normal'></field>
+         <field accessType='inputOutput' type='MFInt32' name='index'></field>
+         <field accessType='inputOutput' type='SFNode' name='appearance'></field>
+      </ProtoInterface>
+      <ProtoBody>
+         <WorldInfo></WorldInfo>
+      </ProtoBody>
+   </ProtoDeclare>
+   <ProtoDeclare name='Fence'>
+      <ProtoInterface>
+         <field accessType='initializeOnly' type='SFInt32' name='fencesPerShape' value='2'></field>
+         <field accessType='initializeOnly' type='MFVec3f' name='start'></field>
+         <field accessType='initializeOnly' type='MFVec3f' name='end'></field>
+         <field accessType='initializeOnly' type='MFFloat' name='panelHeight'></field>
+         <field accessType='initializeOnly' type='MFFloat' name='panelTopHeight'></field>
+         <field accessType='initializeOnly' type='MFBool' name='panelSpan'></field>
+         <field accessType='initializeOnly' type='MFInt32' name='postType'></field>
+         <field accessType='initializeOnly' type='MFInt32' name='postTopType'></field>
+         <field accessType='initializeOnly' type='MFVec3f' name='postSize'></field>
+         <field accessType='initializeOnly' type='MFVec3f' name='postTopSize'></field>
+         <field accessType='initializeOnly' type='MFBool' name='postBraced'></field>
+         <field accessType='initializeOnly' type='MFNode' name='postGeometry'></field>
+         <field accessType='initializeOnly' type='MFNode' name='postTopGeometry'></field>
+         <field accessType='initializeOnly' type='SFInt32' name='panelAppearance' value='0'></field>
+         <field accessType='initializeOnly' type='SFInt32' name='panelTopAppearance' value='0'></field>
+         <field accessType='initializeOnly' type='SFInt32' name='postAppearance' value='0'></field>
+         <field accessType='initializeOnly' type='SFInt32' name='postTopAppearance' value='0'></field>
+         <field accessType='initializeOnly' type='SFInt32' name='panelRailAppearance' value='0'></field>
+         <field accessType='initializeOnly' type='MFNode' name='appearance'></field>
+         <field accessType='initializeOnly' type='MFInt32' name='panelRailType'></field>
+         <field accessType='initializeOnly' type='MFFloat' name='panelRailHeight'></field>
+         <field accessType='initializeOnly' type='MFInt32' name='panelRailCount'></field>
+         <field accessType='initializeOnly' type='MFFloat' name='panelOverhang'></field>
+         <field accessType='initializeOnly' type='MFFloat' name='panelRaisedHeight'></field>
+         <field accessType='initializeOnly' type='SFBool' name='stepped' value='false'></field>
+      </ProtoInterface>
+      <ProtoBody>
+         <Transform DEF='HOLDER'>
+            <Shape>
+               <IndexedTriangleSet solid='false' index='0 1 2 1 3 2'>
+                  <Coordinate DEF='COORD' point='0.0 1.0 0.0 ,0.0 0.0 0.0 ,1.0 1.0 0.0 ,1.0 0.0 0.0'></Coordinate>
+                  <Normal vector='0.0 0.0 1.0 ,0.0 0.0 1.0 ,0.0 0.0 1.0 ,0.0 0.0 1.0'></Normal>
+                  <TextureCoordinate point='0.0 0.0 ,0.0 1.0 ,1.0 0.0 ,1.0 1.0'></TextureCoordinate>
+               </IndexedTriangleSet>
+            </Shape>
+         </Transform>
+         <Script DEF='SCRIPT'>
+            <field accessType='initializeOnly' type='SFInt32' name='fencesPerShape'>
+            </field>
+            <field accessType='initializeOnly' type='MFFloat' name='panelHeight'>
+            </field>
+            <field accessType='initializeOnly' type='MFFloat' name='panelTopHeight'>
+            </field>
+            <field accessType='initializeOnly' type='MFVec3f' name='start'>
+            </field>
+            <field accessType='initializeOnly' type='MFVec3f' name='end'>
+            </field>
+            <field accessType='initializeOnly' type='MFInt32' name='postType'>
+            </field>
+            <field accessType='initializeOnly' type='MFInt32' name='postTopType'>
+            </field>
+            <field accessType='initializeOnly' type='MFVec3f' name='postSize'>
+            </field>
+            <field accessType='initializeOnly' type='MFVec3f' name='postTopSize'>
+            </field>
+            <field accessType='initializeOnly' type='SFInt32' name='panelAppearance'>
+            </field>
+            <field accessType='initializeOnly' type='SFInt32' name='panelTopAppearance'>
+            </field>
+            <field accessType='initializeOnly' type='SFInt32' name='panelRailAppearance'>
+            </field>
+            <field accessType='initializeOnly' type='SFInt32' name='postAppearance'>
+            </field>
+            <field accessType='initializeOnly' type='SFInt32' name='postTopAppearance'>
+            </field>
+         <field accessType='initializeOnly' type='MFNode' name='postGeometry'>         </field>
+         <field accessType='initializeOnly' type='MFNode' name='postTopGeometry'>         </field>
+         <field accessType='initializeOnly' type='MFNode' name='appearance'>         </field>
+         <field accessType='outputOnly' type='MFNode' name='children'>         </field>
+         <IS>
+            <connect nodeField='fencesPerShape' protoField='fencesPerShape'></connect>
+            <connect nodeField='panelHeight' protoField='panelHeight'></connect>
+            <connect nodeField='panelTopHeight' protoField='panelTopHeight'></connect>
+            <connect nodeField='start' protoField='start'></connect>
+            <connect nodeField='end' protoField='end'></connect>
+            <connect nodeField='postType' protoField='postType'></connect>
+            <connect nodeField='postTopType' protoField='postTopType'></connect>
+            <connect nodeField='postSize' protoField='postSize'></connect>
+            <connect nodeField='postTopSize' protoField='postTopSize'></connect>
+            <connect nodeField='postGeometry' protoField='postGeometry'></connect>
+            <connect nodeField='postTopGeometry' protoField='postTopGeometry'></connect>
+            <connect nodeField='panelAppearance' protoField='panelAppearance'></connect>
+            <connect nodeField='panelTopAppearance' protoField='panelTopAppearance'></connect>
+            <connect nodeField='panelRailAppearance' protoField='panelRailAppearance'></connect>
+            <connect nodeField='postAppearance' protoField='postAppearance'></connect>
+            <connect nodeField='postTopAppearance' protoField='postTopAppearance'></connect>
+            <connect nodeField='appearance' protoField='appearance'></connect>
+         </IS>
+            <![CDATA[classes/catalog.Barriers.Fence.Fence.class]]>
+            </Script>
+         <ROUTE fromNode='SCRIPT' fromField='children' toNode='HOLDER' toField='children'></ROUTE>
+         </ProtoBody>
+      </ProtoDeclare>
+</Scene>
+</X3D>

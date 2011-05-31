@@ -1,0 +1,48 @@
+<ChefX3D>
+	<EntityParams>
+		<Sheet name='SMAL'>
+			<Fence stepped='FALSE' panelAppearance='0' panelTopAppearance='4' panelRailAppearance='2' postAppearance='2' postTopAppearance='2' />
+			<Panel panelHeight='2.0' panelTopHeight='0.3' />
+		</Sheet>
+	</EntityParams>
+
+	<ToolParams entityID="1" name="Port Security Barrier" type="TYPE_MULTI_SEGMENT_CREATE">
+	    <Transform rotation="0.0 1.0 0.0 0.0" translation="0.0 0.0 0.0"/>
+	  	<Segments>
+	  		<Segment start='0 0 0' end='1 0 0'>
+		  		<SegmentParams>
+		  			<Sheet name='Segment'>
+		  				<Panel panelHeight='2.0' panelTopHeight='0.3' panelOverhang='0' panelRailCount='2' panelRailHeight='0.075' panelRailType='round' panelRaisedHeight='0' panelSpan='TRUE' />
+		  			</Sheet>
+		  		</SegmentParams>
+		  		<StartVertexParams>
+		  			<Sheet name='Vertex'>
+		  				<Vertex postBraced='FALSE' postTopType='roundAngled' postSize='1 1 1' postTopSize='1 1 1' postType='round'/>
+		  			</Sheet>
+		  		</StartVertexParams>
+		  		<EndVertexParams>
+		  			<Sheet name='Vertex'>
+		  				<Vertex postBraced='FALSE' postTopType='roundAngled' postSize='1 1 1' postTopSize='1 1 1' postType='round'/>
+		  			</Sheet>
+		  		</EndVertexParams>
+		  	</Segment>
+	  		<Segment start='1 0 0' end='2 0 0'>
+		  		<SegmentParams>
+		  			<Sheet name='Segment'>
+		  				<Panel panelHeight='2.0' panelTopHeight='0.3' panelOverhang='0' panelRailCount='2' panelRailHeight='0.075' panelRailType='round' panelRaisedHeight='0' panelSpan='TRUE' />
+		  			</Sheet>
+		  		</SegmentParams>
+		  		<StartVertexParams>
+		  			<Sheet name='Vertex'>
+		  				<Vertex postBraced='FALSE' postTopType='roundAngled' postSize='1 1 1' postTopSize='1 1 1' postType='round'/>
+		  			</Sheet>
+		  		</StartVertexParams>
+		  		<EndVertexParams>
+		  			<Sheet name='Vertex'>
+		  				<Vertex postBraced='FALSE' postTopType='roundAngled' postSize='1 1 1' postTopSize='1 1 1' postType='round'/>
+		  			</Sheet>
+		  		</EndVertexParams>
+		  	</Segment>
+		</Segments>
+	</ToolParams>
+</ChefX3D>

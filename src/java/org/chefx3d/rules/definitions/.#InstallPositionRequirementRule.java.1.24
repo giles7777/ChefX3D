@@ -1,0 +1,2828 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2010
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+import java.util.ArrayList;
+import java.util.Arrays;
+
+import javax.vecmath.Vector3d;
+
+//Internal Imports
+import org.chefx3d.model.AddEntityChildCommand;
+import org.chefx3d.model.AddEntityCommand;
+import org.chefx3d.model.Command;
+import org.chefx3d.model.Entity;
+import org.chefx3d.model.MoveEntityCommand;
+import org.chefx3d.model.MoveEntityTransientCommand;
+import org.chefx3d.model.PositionableEntity;
+import org.chefx3d.model.RuleDataAccessor;
+import org.chefx3d.model.SegmentEntity;
+import org.chefx3d.model.TransitionEntityChildCommand;
+import org.chefx3d.model.WorldModel;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+
+/**
+ * Applies specific positioning requirements to the placement of an entity.
+ * Requirements are based on the legal collisions found and the ability to
+ * place correctly relative to them.
+ *
+ * Each specified relationship must have a related position x,y,z value index
+ * matched to it. For example a classRelationship of [wall standard standardA:
+ * standardB] with respective amounts of [1 2 1] would require 5 position
+ * values. 1 wall + 2 standards + 1 standardA + 1 standardB. If any of these
+ * should not have a position requirement, assign the x,y and z values to the
+ * class constant MAGIC_DNE_VALUE, whatever it is set to.
+ *
+ * @author Ben Yarger
+ * @version $Revision: 1.24 $
+ */
+public class InstallPositionRequirementRule extends Rule {
+
+    private static final String POP_UP_TWO_FIXED_TARGETS =
+        "org.chefx3d.rules.definitions.InstallPositioinRequirementRule.twoFixedTargets";
+
+    private static final String POP_UP_BOUNDS_EXCEEDED =
+        "org.chefx3d.rules.definitions.InstallPositioinRequirementRule.boundsExceeded";
+
+    private static final String POP_UP_MISSING_DATA =
+        "org.chefx3d.rules.definitions.InstallPositionRequirementRule";
+
+    private static final String STATUS_BAR_ADJUSTMENT_NOTE =
+        "org.chefx3d.rules.definitions.InstallPositionRequirementRule.movingCollisions";
+
+    /**
+     * Maximum allowable difference between requisite min and max position
+     * adjustments required.
+     */
+    private static double MAX_ADJ_OFFSET_DEVIATION = 0.002;
+
+    /**
+     * Magic does not exist (DNE) value.
+     * Special value used to denote no position specific requirement exists
+     * for matched relationship. All three x,y,z values will be set to this
+     * for the case to be ignored.
+     */
+    private static double MAGIC_DNE_VALUE = -1000.0;
+
+    /** Static class instance */
+    private static InstallPositionRequirementRule rule =
+        new InstallPositionRequirementRule();
+
+    /** Private constructor. All Rule classes should be implemented this way. */
+    private InstallPositionRequirementRule(){
+
+        ruleType = RULE_TYPE.STANDARD;
+    }
+
+    /**
+     * Return class instance
+     * @return SnapToRotationIcrementRule
+     */
+    public static InstallPositionRequirementRule getInstance(){
+        return rule;
+    }
+
+    @Override
+    protected boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command) {
+
+        // Check for rule use
+        Boolean usesPositionMZRule = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.COLLISION_POSITION_MULTI_ZONE_REQUIREMENTS);
+
+        if(usesPositionMZRule) {
+            // Ignore MZ versions
+            return true;
+        }
+
+        // Check for command case
+        if(command instanceof AddEntityChildCommand){
+            ;
+        } else if (command instanceof AddEntityCommand){
+            ;
+        } else if (command instanceof MoveEntityCommand){
+            ;
+        } else if (command instanceof MoveEntityTransientCommand){
+            ;
+        } else if (command instanceof TransitionEntityChildCommand) {
+            ;
+        } else {
+
+            // If not one of the required types return
+            return true;
+        }
+
+        // Check for rule use
+        Boolean usesPositionRule = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.COLLISION_POSITION_REQUIREMENTS);
+
+        if(usesPositionRule == null || !usesPositionRule){
+            return true;
+        }
+
+        // Set off to process
+        return startProcessing(model, command, entity);
+    }
+
+    /**
+     * Checks to see if the analysisEntity has imposed collision requirements
+     * on it by other entities colliding with it.
+     *
+     * @param model WorldModel to reference
+     * @param command Command adjusting analysisEntity
+     * @param analysisEntity Entity to perform the checks against
+     * @return True if there are imposed requirements, false otherwise
+     */
+    public boolean hasPositionCollisionRequirementImposed(
+            WorldModel model,
+            Command command,
+            Entity analysisEntity) {
+
+        if (!(analysisEntity instanceof PositionableEntity)) {
+            return false;
+        }
+//      System.out.println("888888888888888888888888888888888888888888888888888888");
+        Entity startingEntity = null;
+        Entity endingEntity = null;
+        double[] startPosition = new double[3];
+        double[] endPosition = new double[3];
+
+        if (command instanceof MoveEntityCommand) {
+
+            ((MoveEntityCommand)command).getEndPosition(endPosition);
+            ((MoveEntityCommand)command).getStartPosition(startPosition);
+
+            ((MoveEntityCommand)command).setEndPosition(startPosition);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            ((MoveEntityTransientCommand)command).getPosition(endPosition);
+            ((PositionableEntity)analysisEntity).getStartingPosition(
+                    startPosition);
+
+            ((MoveEntityTransientCommand)command).setPosition(startPosition);
+//          System.out.println("MoveEntityTransient");
+//          System.out.println("startingPosition: "+Arrays.toString(startPosition));
+//          System.out.println("endingPosition: "+Arrays.toString(endPosition));
+
+        } else if (command instanceof TransitionEntityChildCommand) {
+
+            endingEntity =
+                ((TransitionEntityChildCommand)command).getEndParentEntity();
+            startingEntity =
+                ((TransitionEntityChildCommand)command).getStartParentEntity();
+
+            ((TransitionEntityChildCommand)command).getEndPosition(
+                    endPosition);
+            ((TransitionEntityChildCommand)command).getStartPosition(
+                    startPosition);
+
+            ((TransitionEntityChildCommand)command).setEndParentEntity(
+                    startingEntity);
+            ((TransitionEntityChildCommand)command).setEndPosition(
+                    startPosition);
+
+            double[] startingPosition = new double[3];
+            ((PositionableEntity)analysisEntity).getStartingPosition(startingPosition);
+//          System.out.println("TransitionEntityChildCommand");
+//          System.out.println("startingEntity: "+startingEntity.getName());
+//          System.out.println("startPosition: "+Arrays.toString(startPosition));
+//          System.out.println("original starting position: "+Arrays.toString(startingPosition));
+
+            double[] startRelPos = getPositionRelativeToZone(model, startingEntity);
+//          System.out.println("start parent relative pos to zone: "+Arrays.toString(startRelPos));
+        } else {
+//          System.out.println("returning false 1");
+            return false;
+        }
+
+        // Gather our collision set
+        performCollisionCheck(command, false);
+
+        printCollisionEntitiesList();
+//System.out.println("confirm entity ID's: "+((RuleDataAccessor)command).getEntity().getEntityID()+" analysis entity: "+analysisEntity.getEntityID());
+        // Add the start position as a surrogate for looped checks
+        addSurrogate(command);
+
+        // Reset values
+        if (command instanceof MoveEntityCommand) {
+
+            ((MoveEntityCommand)command).setEndPosition(endPosition);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            ((MoveEntityTransientCommand)command).setPosition(endPosition);
+
+        } else if (command instanceof TransitionEntityChildCommand) {
+
+            ((TransitionEntityChildCommand)command).setEndParentEntity(
+                    endingEntity);
+            ((TransitionEntityChildCommand)command).setEndPosition(
+                    endPosition);
+
+        }
+
+        ArrayList<Entity> testSubjects =
+            new ArrayList<Entity>(collisionEntities);
+
+        for (int i = 0; i < testSubjects.size(); i++) {
+
+            Entity collisionEntity = testSubjects.get(i);
+
+            // Don't bother with non positionable entities
+            if (!(collisionEntity instanceof PositionableEntity)) {
+                continue;
+            }
+
+            // Don't bother with entities that don't use collision
+            // positioning.
+            Boolean usesPositionRule = (Boolean)
+                RulePropertyAccessor.getRulePropertyValue(
+                    collisionEntity,
+                    ChefX3DRuleProperties.COLLISION_POSITION_REQUIREMENTS);
+
+            if (usesPositionRule == null || usesPositionRule == false) {
+                continue;
+            }
+
+            // Create our reset position command
+            double[] position = new double[3];
+            ((PositionableEntity)collisionEntity).getPosition(position);
+
+            float[] bounds = new float[6];
+            ((PositionableEntity)collisionEntity).getBounds(bounds);
+//          System.out.println("collision entity: "+collisionEntity.getName()+" id: "+collisionEntity.getEntityID()+" position: "+Arrays.toString(position)+" bounds: "+Arrays.toString(bounds));
+            MoveEntityCommand tmpMvCmd =
+                new MoveEntityCommand(
+                        model,
+                        model.issueEntityID(),
+                        collisionEntity.getEntityID(),
+                        position,
+                        position);
+
+            // Perform collision check to see what we are working with.
+            // Requires doing collision analysis
+            performCollisionCheck(tmpMvCmd);
+
+//          System.out.println("individual case:-----------------------------");
+            printCollisionEntitiesList();
+
+            String[] classRelationship = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    collisionEntity,
+                    ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+            int[] relationshipAmount = (int[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    collisionEntity,
+                    ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP);
+
+            Enum[] relModifier = (Enum[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    collisionEntity,
+                    ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP);
+
+            // Perform collision analysis, if returns false it is because
+            // requisite data could not be extracted.
+            if(!performCollisionAnalysisHelper(
+                    collisionEntity,
+                    null,
+                    false,
+                    null,
+                    true)){
+
+                continue;
+            }
+
+            // If no collisions exist, don't process any further
+            if(collisionEntities == null || collisionEntities.size() == 0){
+
+                continue;
+            }
+
+            // If illegal collision results exist don't process any further
+            if (hasIllegalCollisionHelper(collisionEntity)) {
+
+                removeSurrogate((PositionableEntity)analysisEntity);
+                System.out.println("return true 2");
+                return true;
+            }
+
+            // Retrieve the legal classification index. If -1 stop execution
+            int legalIndex =
+                hasLegalModelCollisions(
+                        classRelationship,
+                        relationshipAmount,
+                        relModifier);
+
+            if (legalIndex < 0) {
+
+                legalIndex =
+                    hasLegalSegmentCollisions(
+                            classRelationship,
+                            relationshipAmount,
+                            relModifier);
+
+                if(legalIndex < 0){
+
+                    legalIndex =
+                        checkCrossCategoryCollisions(
+                                classRelationship,
+                                relationshipAmount,
+                                relModifier);
+
+                    if (legalIndex < 0) {
+
+                        continue;
+                    }
+                }
+            }
+
+            // Get the starting and ending index of position values that match
+            // the relationship being analyzed.
+            String classRelationshipVal = classRelationship[legalIndex];
+            int relationshipAmountVal = relationshipAmount[legalIndex];
+
+            int startPosIndex =
+                calculateStartPosIndex(
+                    classRelationship,
+                    relationshipAmount,
+                    legalIndex);
+
+            int endPosIndex =
+                calculateEndPosIndex(
+                        classRelationship,
+                        relationshipAmount,
+                        legalIndex);
+
+            // Grab required data sets
+            float[] xPosValues = (float[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    collisionEntity,
+                    ChefX3DRuleProperties.COLLISION_POSITION_X_AXIS_VALUES);
+
+            float[] yPosValues = (float[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    collisionEntity,
+                    ChefX3DRuleProperties.COLLISION_POSITION_Y_AXIS_VALUES);
+
+            float[] zPosValues = (float[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    collisionEntity,
+                    ChefX3DRuleProperties.COLLISION_POSITION_Z_AXIS_VALUES);
+
+            float[] posTolerance = (float[])
+                RulePropertyAccessor.getRulePropertyValue(
+                    collisionEntity,
+                    ChefX3DRuleProperties.COLLISION_POSITION_TOLERANCE);
+
+            Enum[] targetAdjustmentAxis = (Enum[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        collisionEntity,
+                        ChefX3DRuleProperties.COLLISION_TARGET_ADJUSTMENT_AXIS);
+
+            if(xPosValues == null ||
+                    yPosValues == null ||
+                    zPosValues == null ||
+                    posTolerance == null ||
+                    targetAdjustmentAxis == null){
+
+                continue;
+            }
+
+            // Generate the precise list of relationships to satisfy
+            String[] relationships =
+                buildFullRelationshipList(
+                        classRelationshipVal,
+                        relationshipAmountVal);
+
+            // Generate the position collision data objects for evaluation
+            PositionCollisionData[] posColData =
+                buildPositionCollisionData(
+                    model,
+                    collisionEntity,
+                    xPosValues,
+                    yPosValues,
+                    zPosValues,
+                    posTolerance,
+                    targetAdjustmentAxis,
+                    startPosIndex,
+                    endPosIndex,
+                    relationships);
+
+            // Make sure we got position collision data
+            if(posColData == null){
+
+                continue;
+            }
+
+            for (int w = 0; w < posColData.length; w++) {
+                if (posColData[w].getEntity() == analysisEntity) {
+                    removeSurrogate((PositionableEntity)analysisEntity);
+                    System.out.println("return true 3");
+                    return true;
+                }
+            }
+        }
+        System.out.println("return false 4");
+        removeSurrogate((PositionableEntity)analysisEntity);
+        return false;
+    }
+
+    //-------------------------------------------------------------------------
+    // Private methods
+    //-------------------------------------------------------------------------
+
+    /**
+     * Kick off processing of the rule
+     *
+     * @param model WorldModel to reference
+     * @param command Command that was issued
+     * @param entity Entity affected
+     * @return True if command should continue, false otherwise
+     */
+    private boolean startProcessing(
+            WorldModel model,
+            Command command,
+            Entity entity){
+
+        // Perform collision check to see what we are working with.
+        // Requires doing collision analysis
+        performCollisionCheck(command, false);
+
+        String[] classRelationship = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+        int[] relationshipAmount = (int[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP);
+
+        Enum[] relModifier = (Enum[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP);
+
+        // Perform collision analysis, if returns false it is because
+        // requisite data could not be extracted.
+        if(!performCollisionAnalysisHelper(
+                entity,
+                null,
+                false,
+                null,
+                true)){
+
+            return false;
+        }
+
+        // If no collisions exist, don't process any further
+        if(collisionEntities == null || collisionEntities.size() == 0){
+
+            if(command.isTransient()){
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        // If illegal collision results exist don't process any further
+        if(hasIllegalCollisions(
+                classRelationship,
+                relationshipAmount,
+                relModifier)){
+
+            if(command.isTransient()){
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        // Retrieve the legal classification index. If -1 stop execution
+        int legalIndex =
+            hasLegalModelCollisions(
+                    classRelationship,
+                    relationshipAmount,
+                    relModifier);
+
+        if (legalIndex < 0) {
+
+            legalIndex =
+                hasLegalSegmentCollisions(
+                        classRelationship,
+                        relationshipAmount,
+                        relModifier);
+
+            if(legalIndex < 0){
+
+                legalIndex =
+                    checkCrossCategoryCollisions(
+                            classRelationship,
+                            relationshipAmount,
+                            relModifier);
+
+                if (legalIndex < 0) {
+                    String msg = intl_mgr.getString(POP_UP_BOUNDS_EXCEEDED);
+                    popUpMessage.showMessage(msg);
+                    return false;
+                }
+            }
+        }
+
+
+
+        // Get the starting and ending index of position values that match
+        // the relationship being analyzed.
+        String classRelationshipVal = classRelationship[legalIndex];
+        int relationshipAmountVal = relationshipAmount[legalIndex];
+
+        int startPosIndex =
+            calculateStartPosIndex(
+                classRelationship,
+                relationshipAmount,
+                legalIndex);
+
+        int endPosIndex =
+            calculateEndPosIndex(
+                    classRelationship,
+                    relationshipAmount,
+                    legalIndex);
+
+        // Grab required data sets
+        float[] xPosValues = (float[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.COLLISION_POSITION_X_AXIS_VALUES);
+
+        float[] yPosValues = (float[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.COLLISION_POSITION_Y_AXIS_VALUES);
+
+        float[] zPosValues = (float[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.COLLISION_POSITION_Z_AXIS_VALUES);
+
+        float[] posTolerance = (float[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.COLLISION_POSITION_TOLERANCE);
+
+        Enum[] targetAdjustmentAxis = (Enum[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.COLLISION_TARGET_ADJUSTMENT_AXIS);
+
+        if(xPosValues == null ||
+                yPosValues == null ||
+                zPosValues == null ||
+                posTolerance == null ||
+                targetAdjustmentAxis == null){
+
+            String msg = intl_mgr.getString(POP_UP_MISSING_DATA);
+            popUpMessage.showMessage(msg);
+
+            return false;
+        }
+
+        // Generate the precise list of relationships to satisfy
+        String[] relationships =
+            buildFullRelationshipList(
+                    classRelationshipVal,
+                    relationshipAmountVal);
+
+        // Hand off to appropriate processing routine
+        boolean processResult = false;
+
+        if(command instanceof AddEntityChildCommand){
+
+            AddEntityChildCommand addEntityChildCmd =
+                ((AddEntityChildCommand)command);
+
+            Entity parentEntity = addEntityChildCmd.getParentEntity();
+            int parentEntityID = parentEntity.getEntityID();
+
+            processResult = processAdd(
+                    model,
+                    entity,
+                    parentEntityID,
+                    xPosValues,
+                    yPosValues,
+                    zPosValues,
+                    posTolerance,
+                    targetAdjustmentAxis,
+                    startPosIndex,
+                    endPosIndex,
+                    relationships);
+
+        } else if (command instanceof AddEntityCommand){
+
+            processResult = processAdd(
+                    model,
+                    entity,
+                    entity.getParentEntityID(),
+                    xPosValues,
+                    yPosValues,
+                    zPosValues,
+                    posTolerance,
+                    targetAdjustmentAxis,
+                    startPosIndex,
+                    endPosIndex,
+                    relationships);
+
+        } else if (command instanceof MoveEntityCommand){
+
+            processResult = processMove(
+                    model,
+                    (MoveEntityCommand)command,
+                    entity,
+                    xPosValues,
+                    yPosValues,
+                    zPosValues,
+                    posTolerance,
+                    targetAdjustmentAxis,
+                    startPosIndex,
+                    endPosIndex,
+                    relationships);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            processResult = processMoveTransient(
+                    model,
+                    (MoveEntityTransientCommand)command,
+                    entity,
+                    xPosValues,
+                    yPosValues,
+                    zPosValues,
+                    posTolerance,
+                    targetAdjustmentAxis,
+                    startPosIndex,
+                    endPosIndex,
+                    relationships);
+
+        } else if (command instanceof TransitionEntityChildCommand) {
+
+            if (command.isTransient()) {
+                processResult = true;
+            } else {
+                processResult = processTransition(
+                        model,
+                        (TransitionEntityChildCommand)command,
+                        entity,
+                        xPosValues,
+                        yPosValues,
+                        zPosValues,
+                        posTolerance,
+                        targetAdjustmentAxis,
+                        startPosIndex,
+                        endPosIndex,
+                        relationships);
+            }
+        }
+
+        return processResult;
+    }
+
+
+
+
+    //---------------------------------------------------------------
+    // Processing routines
+    //---------------------------------------------------------------
+
+    /**
+     * Process add commands. If possible adjust the
+     * collision parts to assist with placement. Note, no parts will be
+     * adjusted if they have other product attached, or if it violates
+     * span requirements.
+     *
+     * Note: startPosIndex and endPosIndex define the specific range
+     * of position values to evaluate. These are matched to the list of
+     * legal relationships and because we are dealing with a subset of those
+     * relationships, we need to know the matching range of position values.
+     *
+     * @param model WorldModel to reference
+     * @param entity Entity affected by command
+     * @param xPosValues X axis position requirements
+     * @param yPosValues Y axis position requirements
+     * @param zPosValues Z axis position requirements
+     * @param posTolerance Tolerance values for each position requirement
+     * @param targetAdjustmentAxis Adjustment axis for each position
+     * @param startPosIndex Starting index for position values
+     * @param endPosIndex End index for position values
+     * @param relationships Relationships we are fitting to
+     * @return True if successful, false otherwise
+     */
+    private boolean processAdd(
+            WorldModel model,
+            Entity entity,
+            int parentEntityID,
+            float[] xPosValues,
+            float[] yPosValues,
+            float[] zPosValues,
+            float[] posTolerance,
+            Enum[] targetAdjustmentAxis,
+            int startPosIndex,
+            int endPosIndex,
+            String[] relationships){
+
+        int originalParentEntityId = entity.getParentEntityID();
+        entity.setParentEntityID(parentEntityID);
+
+        double[] pos = new double[3];
+        ((PositionableEntity)entity).getPosition(pos);
+
+        // Generate the position collision data objects for evaluation
+        PositionCollisionData[] posColData =
+            buildPositionCollisionData(
+                model,
+                entity,
+                xPosValues,
+                yPosValues,
+                zPosValues,
+                posTolerance,
+                targetAdjustmentAxis,
+                startPosIndex,
+                endPosIndex,
+                relationships);
+
+        entity.setParentEntityID(originalParentEntityId);
+
+        // Make sure we got position collision data
+        if(posColData == null){
+            String msg = intl_mgr.getString(POP_UP_BOUNDS_EXCEEDED);
+            popUpMessage.showMessage(msg);
+            return false;
+        }
+
+        // Begin process of repositioning collision products
+        Entity fixedEntity = null;
+        double[] fixedEntityAdjustment = new double[3];
+        ArrayList<Command> cmdList = new ArrayList<Command>();
+        int posColDataIndex = -1;
+
+        // Isolate the sole fixed entity that cannot move.
+        // It is possible there may not be one.
+        for(int i = 0; i < posColData.length; i++){
+
+            if(posColData[i].isAdjustmentNeeded() &&
+                    posColData[i].isFixedEntity()){
+
+                if(fixedEntity != null){
+
+                    boolean result =
+                        attemptToSnapToPositions(posColData, pos);
+
+                    if (result) {
+
+                        ((PositionableEntity)entity).setPosition(pos, false);
+                        return true;
+                    } else {
+
+                        String msg = intl_mgr.getString(POP_UP_TWO_FIXED_TARGETS);
+                        popUpMessage.showMessage(msg);
+                        return false;
+                    }
+
+                } else {
+
+                    fixedEntity = posColData[i].getEntity();
+                    posColData[i].getDistance(fixedEntityAdjustment);
+                    posColDataIndex = i;
+
+                }
+            }
+        }
+
+        // Attempt to issue move commands for all of the collision entities
+        cmdList =
+            updateCollisionPositions(
+                    model,
+                    entity,
+                    posColData,
+                    fixedEntityAdjustment);
+
+        if(cmdList == null){
+
+            String msg = intl_mgr.getString(POP_UP_TWO_FIXED_TARGETS);
+            popUpMessage.showMessage(msg);
+            return false;
+        }
+
+        // If the collision entity is the parent of the entity everything
+        // is moving relative to, move the entity back the same offset
+        // as the parent in the opposite direction
+        for (int i = 0; i < cmdList.size(); i++) {
+
+            MoveEntityCommand mvCmd = (MoveEntityCommand) cmdList.get(i);
+
+            if (mvCmd.getEntity().getEntityID() == parentEntityID) {
+
+                double[] startPosition = new double[3];
+                double[] endPosition = new double[3];
+
+                mvCmd.getStartPosition(startPosition);
+                mvCmd.getEndPosition(endPosition);
+
+                double[] offset = new double[3];
+
+                offset[0] = startPosition[0] - endPosition[0];
+                offset[1] = startPosition[1] - endPosition[1];
+                offset[2] = startPosition[2] - endPosition[2];
+
+                double[] currentPos = new double[3];
+
+                ((PositionableEntity)entity).getPosition(currentPos);
+
+                currentPos[0] = currentPos[0] + offset[0];
+                currentPos[1] = currentPos[1] + offset[1];
+                currentPos[2] = currentPos[2] + offset[2];
+
+                ((PositionableEntity)entity).setPosition(currentPos, false);
+
+                break;
+            }
+        }
+
+        // Add newly issued command list to be executed
+        addNewlyIssuedCommand(cmdList);
+
+        // If we have a fixedEntity, move the adjustment distance in the
+        // axis adjustment direction to position correctly.
+        // Otherwise, everything else is moving relative to the entity.
+        if(fixedEntity != null){
+
+            double[] endPos = new double[3];
+            double[] endPosAdjustment = new double[3];
+
+            ((PositionableEntity)entity).getPosition(endPos);
+            posColData[posColDataIndex].getDistance(endPosAdjustment);
+
+            switch(posColData[posColDataIndex].getAdjustmentAxis()){
+
+            case XAXIS:
+                endPos[0] += endPosAdjustment[0];
+                break;
+
+            case YAXIS:
+                endPos[1] += endPosAdjustment[1];
+                break;
+
+            case ZAXIS:
+                endPos[2] += endPosAdjustment[2];
+                break;
+
+            }
+
+            ((PositionableEntity)entity).setPosition(endPos, false);
+        }
+
+        return true;
+    }
+
+    /**
+     * Handle movement (non transient) commands. If possible adjust the
+     * collision parts to assist with placement. Note, no parts will be
+     * adjusted if they have other product attached, or if it violates
+     * span requirements.
+     *
+     * Note: startPosIndex and endPosIndex define the specific range
+     * of position values to evaluate. These are matched to the list of
+     * legal relationships and because we are dealing with a subset of those
+     * relationships, we need to know the matching range of position values.
+     *
+     * @param model WorldModel to reference
+     * @param command MoveEntityCommand to evaluate
+     * @param entity Entity affected by command
+     * @param xPosValues X axis position requirements
+     * @param yPosValues Y axis position requirements
+     * @param zPosValues Z axis position requirements
+     * @param posTolerance Tolerance values for each position requirement
+     * @param targetAdjustmentAxis Adjustment axis for each position
+     * @param startPosIndex Starting index for position values
+     * @param endPosIndex End index for position values
+     * @param relationships Relationships we are fitting to
+     * @return True if successful, false otherwise
+     */
+    private boolean processMove(
+            WorldModel model,
+            MoveEntityCommand command,
+            Entity entity,
+            float[] xPosValues,
+            float[] yPosValues,
+            float[] zPosValues,
+            float[] posTolerance,
+            Enum[] targetAdjustmentAxis,
+            int startPosIndex,
+            int endPosIndex,
+            String[] relationships){
+
+
+        int parentEntityID = entity.getParentEntityID();
+
+        double[] endPos = new double[3];
+        command.getEndPosition(endPos);
+
+        double[] currentPos = new double[3];
+        ((PositionableEntity)entity).getPosition(currentPos);
+        ((PositionableEntity)entity).setPosition(endPos, false);
+
+        // Generate the position collision data objects for evaluation
+        PositionCollisionData[] posColData =
+            buildPositionCollisionData(
+                model,
+                entity,
+                xPosValues,
+                yPosValues,
+                zPosValues,
+                posTolerance,
+                targetAdjustmentAxis,
+                startPosIndex,
+                endPosIndex,
+                relationships);
+
+        ((PositionableEntity)entity).setPosition(currentPos, false);
+
+        // Make sure we got position collision data
+        if(posColData == null){
+
+            return false;
+        }
+
+        // Make sure we got position collision data
+        if(posColData == null){
+
+            return false;
+        }
+
+        // Begin process of repositioning collision products
+        Entity fixedEntity = null;
+        double[] fixedEntityAdjustment = new double[3];
+        ArrayList<Command> cmdList = new ArrayList<Command>();
+        int posColDataIndex = -1;
+
+        // Isolate the sole fixed entity that cannot move.
+        // It is possible there may not be one.
+        for(int i = 0; i < posColData.length; i++){
+
+            if(posColData[i].isAdjustmentNeeded() &&
+                    posColData[i].isFixedEntity()){
+
+                if(fixedEntity != null){
+
+                    boolean result =
+                        attemptToSnapToPositions(posColData, endPos);
+
+                    if (result) {
+
+                        command.setEndPosition(endPos);
+                        return true;
+                    } else {
+                        String msg = intl_mgr.getString(POP_UP_TWO_FIXED_TARGETS);
+                        popUpMessage.showMessage(msg);
+                        return false;
+                    }
+
+                } else {
+
+                    fixedEntity = posColData[i].getEntity();
+                    posColData[i].getDistance(fixedEntityAdjustment);
+                    posColDataIndex = i;
+
+                }
+            }
+        }
+
+        // Attempt to issue move commands for all of the collision entities
+        cmdList =
+            updateCollisionPositions(
+                    model,
+                    entity,
+                    posColData,
+                    fixedEntityAdjustment);
+
+        if(cmdList == null){
+
+            String msg = intl_mgr.getString(POP_UP_TWO_FIXED_TARGETS);
+            popUpMessage.showMessage(msg);
+            return false;
+        }
+
+        // If the collision entity is the parent of the entity everything
+        // is moving relative to, move the entity back the same offset
+        // as the parent in the opposite direction
+        for (int i = 0; i < cmdList.size(); i++) {
+
+            MoveEntityCommand mvCmd = (MoveEntityCommand) cmdList.get(i);
+
+            if (mvCmd.getEntity().getEntityID() == parentEntityID) {
+
+                double[] startPosition = new double[3];
+                double[] endPosition = new double[3];
+
+                mvCmd.getStartPosition(startPosition);
+                mvCmd.getEndPosition(endPosition);
+
+                double[] offset = new double[3];
+
+                offset[0] = startPosition[0] - endPosition[0];
+                offset[1] = startPosition[1] - endPosition[1];
+                offset[2] = startPosition[2] - endPosition[2];
+
+                endPos[0] = endPos[0] + offset[0];
+                endPos[1] = endPos[1] + offset[1];
+                endPos[2] = endPos[2] + offset[2];
+
+                command.setEndPosition(endPos);
+
+                break;
+            }
+        }
+
+        // Add newly issued command list to be executed
+        addNewlyIssuedCommand(cmdList);
+
+        // If we have a fixedEntity, move the adjustment distance in the
+        // axis adjustment direction to position correctly.
+        // Otherwise, everything else is moving relative to the entity.
+        if(fixedEntity != null){
+
+            double[] endPosAdjustment = new double[3];
+
+            posColData[posColDataIndex].getDistance(endPosAdjustment);
+
+            switch(posColData[posColDataIndex].getAdjustmentAxis()){
+
+            case XAXIS:
+                endPos[0] += endPosAdjustment[0];
+                break;
+
+            case YAXIS:
+                endPos[1] += endPosAdjustment[1];
+                break;
+
+            case ZAXIS:
+                endPos[2] += endPosAdjustment[2];
+                break;
+
+            }
+
+            command.setEndPosition(endPos);
+        }
+
+        return true;
+    }
+
+    /**
+     * Handle move transient command processing to try and snap product to
+     * attachment points along adjustment axis.
+     *
+     * @param model WorldModel to reference
+     * @param command Command changing world model
+     * @param entity Entity changed by command
+     * @param xPosValues Set of x positions expecting collisions
+     * @param yPosValues Set of y positions expecting collisions
+     * @param zPosValues Set of z positions expecting collisions
+     * @param posTolerance Set of position specific tolerances
+     * @param targetAdjustmentAxis Set of adjustment axis for each position
+     * @param startPosIndex Starting index of position data
+     * @param endPosIndex Starting index of position data
+     * @param relationships Set of class relationships to match up with
+     * @return True if command position updated, false otherwise
+     */
+    private boolean processMoveTransient(
+            WorldModel model,
+            MoveEntityTransientCommand command,
+            Entity entity,
+            float[] xPosValues,
+            float[] yPosValues,
+            float[] zPosValues,
+            float[] posTolerance,
+            Enum[] targetAdjustmentAxis,
+            int startPosIndex,
+            int endPosIndex,
+            String[] relationships){
+
+        // Perform legal collision check to see if there would be a legal
+        // collision and if so display the status bar message that explains
+        // placement could require adjustment of installed products.
+        performCollisionCheck(command);
+        performCollisionAnalysisHelper(entity, null, false, null, true);
+
+        if (!hasIllegalCollisionHelper(entity)) {
+
+            boolean showStatusMessage = true;
+
+            // Don't show the status message if collision is not strictly with
+            // TYPE_MODEL entities.
+            for (int i = 0; i < collisionEntities.size(); i++) {
+                if (collisionEntities.get(i).getType() != Entity.TYPE_MODEL) {
+                    showStatusMessage = false;
+                    break;
+                }
+            }
+
+            if (showStatusMessage) {
+                String msg = intl_mgr.getString(STATUS_BAR_ADJUSTMENT_NOTE);
+                statusBar.setMessage(msg);
+            }
+        }
+
+        // Regular processing
+        double[] endPos = new double[3];
+        command.getPosition(endPos);
+
+        double[] currentPos = new double[3];
+        ((PositionableEntity)entity).getPosition(currentPos);
+        ((PositionableEntity)entity).setPosition(endPos, false);
+
+        PositionCollisionData[] posColData =
+            buildPositionCollisionData(
+                model,
+                entity,
+                xPosValues,
+                yPosValues,
+                zPosValues,
+                posTolerance,
+                targetAdjustmentAxis,
+                startPosIndex,
+                endPosIndex,
+                relationships);
+
+        ((PositionableEntity)entity).setPosition(currentPos, false);
+
+        if(posColData == null){
+
+            return true;
+        }
+
+        boolean result =
+            attemptToSnapToPositions(posColData, endPos);
+
+        if (result) {
+            command.setPosition(endPos);
+        }
+
+        return true;
+    }
+
+    /**
+     * Handle TransitionEntityChild commands. If possible adjust the
+     * collision parts to assist with placement. Note, no parts will be
+     * adjusted if they have other product attached, or if it violates
+     * span requirements.
+     *
+     * Note: startPosIndex and endPosIndex define the specific range
+     * of position values to evaluate. These are matched to the list of
+     * legal relationships and because we are dealing with a subset of those
+     * relationships, we need to know the matching range of position values.
+     *
+     * @param model WorldModel to reference
+     * @param command TransitionEntityChildCommand to evaluate
+     * @param entity Entity affected by command
+     * @param xPosValues X axis position requirements
+     * @param yPosValues Y axis position requirements
+     * @param zPosValues Z axis position requirements
+     * @param posTolerance Tolerance values for each position requirement
+     * @param targetAdjustmentAxis Adjustment axis for each position
+     * @param startPosIndex Starting index for position values
+     * @param endPosIndex End index for position values
+     * @param relationships Relationships we are fitting to
+     * @return True if successful, false otherwise
+     */
+    private boolean processTransition(
+            WorldModel model,
+            TransitionEntityChildCommand command,
+            Entity entity,
+            float[] xPosValues,
+            float[] yPosValues,
+            float[] zPosValues,
+            float[] posTolerance,
+            Enum[] targetAdjustmentAxis,
+            int startPosIndex,
+            int endPosIndex,
+            String[] relationships){
+
+
+        int parentEntityID = command.getEndParentEntity().getEntityID();
+        int currentParentEntityID = entity.getParentEntityID();
+
+        double[] endPos = new double[3];
+        command.getEndPosition(endPos);
+
+        double[] currentPos = new double[3];
+        ((PositionableEntity)entity).getPosition(currentPos);
+
+        ((PositionableEntity)entity).setPosition(endPos, false);
+        ((PositionableEntity)entity).setParentEntityID(parentEntityID);
+
+        // Generate the position collision data objects for evaluation
+        PositionCollisionData[] posColData =
+            buildPositionCollisionData(
+                model,
+                entity,
+                xPosValues,
+                yPosValues,
+                zPosValues,
+                posTolerance,
+                targetAdjustmentAxis,
+                startPosIndex,
+                endPosIndex,
+                relationships);
+
+        ((PositionableEntity)entity).setPosition(currentPos, false);
+        ((PositionableEntity)entity).setParentEntityID(currentParentEntityID);
+
+        // Make sure we got position collision data
+        if(posColData == null){
+
+            return false;
+        }
+
+        // Make sure we got position collision data
+        if(posColData == null){
+
+            return false;
+        }
+
+        // Begin process of repositioning collision products
+        Entity fixedEntity = null;
+        double[] fixedEntityAdjustment = new double[3];
+        ArrayList<Command> cmdList = new ArrayList<Command>();
+        int posColDataIndex = -1;
+
+        // Isolate the sole fixed entity that cannot move.
+        // It is possible there may not be one.
+        for(int i = 0; i < posColData.length; i++){
+
+            if(posColData[i].isAdjustmentNeeded() &&
+                    posColData[i].isFixedEntity()){
+
+                if(fixedEntity != null){
+
+                    boolean result =
+                        attemptToSnapToPositions(posColData, endPos);
+
+                    if (result) {
+
+                        command.setEndPosition(endPos);
+                        return true;
+                    } else {
+                        String msg = intl_mgr.getString(POP_UP_TWO_FIXED_TARGETS);
+                        popUpMessage.showMessage(msg);
+                        return false;
+                    }
+
+                } else {
+
+                    fixedEntity = posColData[i].getEntity();
+                    posColData[i].getDistance(fixedEntityAdjustment);
+                    posColDataIndex = i;
+
+                }
+            }
+        }
+
+        // Attempt to issue move commands for all of the collision entities
+        cmdList =
+            updateCollisionPositions(
+                    model,
+                    entity,
+                    posColData,
+                    fixedEntityAdjustment);
+
+        if(cmdList == null){
+
+            String msg = intl_mgr.getString(POP_UP_TWO_FIXED_TARGETS);
+            popUpMessage.showMessage(msg);
+            return false;
+        }
+
+        // If the collision entity is the parent of the entity everything
+        // is moving relative to, move the entity back the same offset
+        // as the parent in the opposite direction
+        for (int i = 0; i < cmdList.size(); i++) {
+
+            MoveEntityCommand mvCmd = (MoveEntityCommand) cmdList.get(i);
+
+            if (mvCmd.getEntity().getEntityID() == parentEntityID) {
+
+                double[] startPosition = new double[3];
+                double[] endPosition = new double[3];
+
+                mvCmd.getStartPosition(startPosition);
+                mvCmd.getEndPosition(endPosition);
+
+                double[] offset = new double[3];
+
+                offset[0] = startPosition[0] - endPosition[0];
+                offset[1] = startPosition[1] - endPosition[1];
+                offset[2] = startPosition[2] - endPosition[2];
+
+                endPos[0] = endPos[0] + offset[0];
+                endPos[1] = endPos[1] + offset[1];
+                endPos[2] = endPos[2] + offset[2];
+
+                command.setEndPosition(endPos);
+
+                break;
+            }
+        }
+
+        // Add newly issued command list to be executed
+        addNewlyIssuedCommand(cmdList);
+
+        // If we have a fixedEntity, move the adjustment distance in the
+        // axis adjustment direction to position correctly.
+        // Otherwise, everything else is moving relative to the entity.
+        if(fixedEntity != null){
+
+            double[] endPosAdjustment = new double[3];
+
+            posColData[posColDataIndex].getDistance(endPosAdjustment);
+
+            switch(posColData[posColDataIndex].getAdjustmentAxis()){
+
+            case XAXIS:
+                endPos[0] += endPosAdjustment[0];
+                break;
+
+            case YAXIS:
+                endPos[1] += endPosAdjustment[1];
+                break;
+
+            case ZAXIS:
+                endPos[2] += endPosAdjustment[2];
+                break;
+
+            }
+
+            command.setEndPosition(endPos);
+        }
+
+        return true;
+    }
+
+
+
+
+    //---------------------------------------------------------------
+    // Supporting routines
+    //---------------------------------------------------------------
+
+
+    /**
+     * Determine the starting index for position value analysis
+     *
+     * @param classRelationships Assigned class relationships
+     * @param relationshipAmounts Assigned relationship amounts
+     * @param matchingClassIndex Legal class relationship index
+     * @return starting position index to work from
+     */
+    private int calculateStartPosIndex(
+            String[] classRelationships,
+            int[] relationshipAmounts,
+            int matchingClassIndex){
+
+        int startIndex = 0;
+
+        for(int i = 0; i < matchingClassIndex; i++){
+
+            if(classRelationships[i].contains(":")){
+
+                String[] splitList = classRelationships[i].split(":");
+
+                startIndex += (splitList.length * relationshipAmounts[i]);
+
+            } else {
+
+                startIndex += relationshipAmounts[i];
+            }
+        }
+
+        return startIndex;
+    }
+
+    /**
+     * Determine the ending index for position value analysis
+     *
+     * @param classRelationships Assigned class relationships
+     * @param relationshipAmounts Assigned relationship amounts
+     * @param matchingClassIndex Legal class relationship index
+     * @return starting position index to work from
+     */
+    private int calculateEndPosIndex(
+            String[] classRelationships,
+            int[] relationshipAmounts,
+            int matchingClassIndex){
+
+        int endIndex = 0;
+
+        for(int i = 0; i < matchingClassIndex+1; i++){
+
+            if(classRelationships[i].contains(":")){
+
+                String[] splitList = classRelationships[i].split(":");
+
+                endIndex += (splitList.length * relationshipAmounts[i]);
+
+            } else {
+
+                endIndex += relationshipAmounts[i];
+            }
+        }
+
+        return endIndex;
+    }
+
+    /**
+     * Build the full relationship set that we need to line up positions with.
+     * Splits list up into string array.
+     *
+     * @param classRelationship Single class relationship satisfied by
+     * collisions
+     * @param relationshipAmount Single relationship amount tied to
+     * classRelationship
+     * @return String[] of relationships
+     */
+    private String[] buildFullRelationshipList(
+            String classRelationship,
+            int relationshipAmount){
+
+        String[] relationships;
+
+        if(classRelationship.contains(":")){
+
+            String[] tokens = classRelationship.split(":");
+            relationships =
+                new String[tokens.length*relationshipAmount];
+
+            for(int i = 0; i < relationships.length; i++){
+
+                relationships[i] = tokens[((int)(i/relationshipAmount))];
+            }
+
+        } else {
+
+            relationships = new String[relationshipAmount];
+
+            for(int i = 0; i < relationships.length; i++){
+
+                relationships[i] = classRelationship;
+            }
+        }
+
+        return relationships;
+    }
+
+    /**
+     * Checks the position requirement of the original entity against its
+     * matched counter part. The position requirements will be evaluated
+     * against the matched counter part and with regards to the adjustment
+     * axis specified. The posTolerance value impacts the zoom tolerance.
+     *
+     * @param originalEntity Entity being evaluated for position requirements
+     * @param matchedEntity Entity that fits relationship requirement
+     * @param model World model to reference
+     * @param xPosRequirement X position requirement
+     * @param yPosRequirement Y position requirement
+     * @param zPosRequirement Z position requirement
+     * @param posTolerance Tolerance value to assist w/ evaluating legal offset
+     * @param adjustmentAxis Axis adjustment can be made on
+     * @param offset Offset from position values
+     * @return True if valid offset calculated, false otherwise
+     */
+    private boolean checkPositionProximity(
+            Entity originalEntity,
+            Entity matchedEntity,
+            WorldModel model,
+            float xPosRequirement,
+            float yPosRequirement,
+            float zPosRequirement,
+            float posTolerance,
+            Enum adjustmentAxis,
+            double[] offset){
+
+        if(!(originalEntity instanceof PositionableEntity) ||
+                !(matchedEntity instanceof PositionableEntity)){
+
+            return false;
+        }
+
+        float[] matchedEntityBounds = new float[6];
+        double[] matchedEntityPos = new double[3];
+        double[] originalEntityPos = new double[3];
+        double[] originalEntityPoint = new double[3];
+
+        // Get bounds data
+        if (matchedEntity.getType() == Entity.TYPE_MODEL) {
+            ((PositionableEntity)matchedEntity).getBounds(matchedEntityBounds);
+        } else {
+            ((SegmentEntity)matchedEntity).getLocalBounds(matchedEntityBounds);
+        }
+
+        // Handle segment entity case
+        if (matchedEntity instanceof SegmentEntity) {
+
+            float tmpTwo = matchedEntityBounds[2];
+            float tmpThree = matchedEntityBounds[3];
+
+            matchedEntityBounds[2] = matchedEntityBounds[4];
+            matchedEntityBounds[3] = matchedEntityBounds[5];
+
+            matchedEntityBounds[4] = tmpTwo;
+            matchedEntityBounds[5] = tmpThree;
+
+        }
+
+        // Get positions relative to parent zone. Confirm same zone.
+        Entity originalEntityParentZone =
+            getParentZoneEntity(model, originalEntity);
+
+        Entity matchedEntityParentZone =
+            getParentZoneEntity(model, matchedEntity);
+
+        if(originalEntityParentZone.getEntityID() !=
+            matchedEntityParentZone.getEntityID()){
+
+            return false;
+        }
+
+        originalEntityPos =
+            getRelativePosition(
+                    model,
+                    originalEntity,
+                    originalEntityParentZone,
+                    false);
+
+        if (matchedEntity.getType() == Entity.TYPE_MODEL) {
+            matchedEntityPos =
+                getRelativePosition(
+                        model,
+                        matchedEntity,
+                        matchedEntityParentZone,
+                        false);
+        } else {
+
+            matchedEntityPos[0] = Math.abs(matchedEntityBounds[0]);
+            matchedEntityPos[1] = Math.abs(matchedEntityBounds[2]);
+            matchedEntityPos[2] = Math.abs(matchedEntityBounds[4]);
+        }
+
+        originalEntityPoint[0] = originalEntityPos[0] + xPosRequirement;
+        originalEntityPoint[1] = originalEntityPos[1] + yPosRequirement;
+        originalEntityPoint[2] = originalEntityPos[2] + zPosRequirement;
+
+        // Get meaningful data out of the adjustmentAxis value
+        ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS
+            targetPosAdjAxis =
+                (ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS)
+                adjustmentAxis;
+
+        // Check position requirement out.
+        // Based on the adjustment axis isolate values from the primary
+        // Entity on the other two axis.
+        double[] matchIntersectionPoint = new double[3];
+
+        switch(targetPosAdjAxis){
+
+        case XAXIS:
+            matchIntersectionPoint[0] = matchedEntityPos[0];
+            matchIntersectionPoint[1] = originalEntityPoint[1];
+            matchIntersectionPoint[2] = originalEntityPoint[2];
+            break;
+
+        case YAXIS:
+            matchIntersectionPoint[0] = originalEntityPoint[0];
+            matchIntersectionPoint[1] = matchedEntityPos[1];
+            matchIntersectionPoint[2] = originalEntityPoint[2];
+            break;
+
+        case ZAXIS:
+            matchIntersectionPoint[0] = originalEntityPoint[0];
+            matchIntersectionPoint[1] = originalEntityPoint[1];
+            matchIntersectionPoint[2] = matchedEntityPos[2];
+            break;
+
+        }
+
+        // Examine bounds cases
+        float[] matchedBoundsZoneVal = new float[6];
+
+        matchedBoundsZoneVal[0] =
+            (float)matchedEntityPos[0] + matchedEntityBounds[0];
+
+        matchedBoundsZoneVal[1] =
+            (float)matchedEntityPos[0] + matchedEntityBounds[1];
+
+        matchedBoundsZoneVal[2] =
+            (float)matchedEntityPos[1] + matchedEntityBounds[2];
+
+        matchedBoundsZoneVal[3] =
+            (float)matchedEntityPos[1] + matchedEntityBounds[3];
+
+        matchedBoundsZoneVal[4] =
+            (float)matchedEntityPos[2] + matchedEntityBounds[4];
+
+        matchedBoundsZoneVal[5] =
+            (float)matchedEntityPos[2] + matchedEntityBounds[5];
+
+        // Compare all axis besides z because we are working in the x y
+        // plane only
+        if (matchedBoundsZoneVal[0] > matchIntersectionPoint[0]) {
+            String msg = intl_mgr.getString(POP_UP_BOUNDS_EXCEEDED);
+            popUpMessage.showMessage(msg);
+            return false;
+        } else if (matchedBoundsZoneVal[1] < matchIntersectionPoint[0]) {
+            String msg = intl_mgr.getString(POP_UP_BOUNDS_EXCEEDED);
+            popUpMessage.showMessage(msg);
+            return false;
+        } else if (matchedBoundsZoneVal[2] > matchIntersectionPoint[1]) {
+            String msg = intl_mgr.getString(POP_UP_BOUNDS_EXCEEDED);
+            popUpMessage.showMessage(msg);
+            return false;
+        } else if (matchedBoundsZoneVal[3] < matchIntersectionPoint[1]) {
+            String msg = intl_mgr.getString(POP_UP_BOUNDS_EXCEEDED);
+            popUpMessage.showMessage(msg);
+            return false;
+        }
+
+        // Handle segment entity case
+        if (matchedEntity instanceof SegmentEntity) {
+
+            offset[0] = 0.0;
+            offset[1] = 0.0;
+            offset[2] = 0.0;
+
+            return true;
+        }
+
+        // Calculate the offset vector
+        Vector3d offsetVec = new Vector3d(
+                matchIntersectionPoint[0] - originalEntityPoint[0],
+                matchIntersectionPoint[1] - originalEntityPoint[1],
+                matchIntersectionPoint[2] - originalEntityPoint[2]);
+
+        // Calculate the threshold based on the zoom amount
+        double threshold = getZoomThreshold(view, (double)posTolerance);
+
+        if(offsetVec.length() > threshold){
+            String msg = intl_mgr.getString(POP_UP_BOUNDS_EXCEEDED);
+            popUpMessage.showMessage(msg);
+            return false;
+        }
+
+        offset[0] = offsetVec.x;
+        offset[1] = offsetVec.y;
+        offset[2] = offsetVec.z;
+
+        return true;
+    }
+
+    /**
+     * Generates the PositionCollisionData[] set used by all command
+     * processing routines.
+     *
+     * @param model WorldModel to reference
+     * @param entity Entity with specific relative positions to check
+     * @param xPosValues X axis position set
+     * @param yPosValues Y axis position set
+     * @param zPosValues Z axis position set
+     * @param posTolerance Position tolerance set
+     * @param targetAdjustmentAxis Target adjustment axis set
+     * @param startPosIndex Position data start index
+     * @param endPosIndex Position data end index
+     * @param relationships Relationships to match against
+     * @return PositionCollisionData[] or null if not able to generate it
+     */
+    private PositionCollisionData[] buildPositionCollisionData(
+            WorldModel model,
+            Entity entity,
+            float[] xPosValues,
+            float[] yPosValues,
+            float[] zPosValues,
+            float[] posTolerance,
+            Enum[] targetAdjustmentAxis,
+            int startPosIndex,
+            int endPosIndex,
+            String[] relationships){
+
+        PositionCollisionData[] posColData =
+            new PositionCollisionData[relationships.length];
+
+        ArrayList<Entity> loopSet = new ArrayList<Entity>();
+
+        if (entityMatches.size() > 0) {
+            loopSet = new ArrayList<Entity>(entityMatches);
+        } else if (wallEntityMatches.size() > 0) {
+            loopSet = new ArrayList<Entity>(wallEntityMatches);
+        }
+
+        // Fill up the PositionCollisionData array with position matched data.
+        for(int i = 0; i < loopSet.size(); i++){
+
+            Entity entityMatch = loopSet.get(i);
+
+            String[] entityMatchClass = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        entityMatch,
+                        ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+            // Loop through the relationship parameter and attempt to match
+            // against a classification of the current entity collision under
+            // analysis. If we have a match either create the position
+            // collision data set, or update it if the distance is less than
+            // the one in existence.
+            for(int j = 0; j < relationships.length; j++){
+
+                // NPE safety check
+                int checkIndex = startPosIndex + j;
+
+                if (checkIndex >= xPosValues.length ||
+                        checkIndex >= yPosValues.length ||
+                        checkIndex >= zPosValues.length ||
+                        checkIndex >= posTolerance.length ||
+                        checkIndex >= targetAdjustmentAxis.length) {
+
+                    return null;
+                }
+
+                // Perform special index check to see if the MAGIC_DNE_VALUE
+                // applies to the positions set. If it does, then we ignore
+                // any position requirements for this relationship and don't
+                // bother creating position collision data for it.
+                if (xPosValues[checkIndex] == MAGIC_DNE_VALUE &&
+                        yPosValues[checkIndex] == MAGIC_DNE_VALUE &&
+                        zPosValues[checkIndex] == MAGIC_DNE_VALUE) {
+
+                    continue;
+                }
+
+                for(int w = 0; w < entityMatchClass.length; w++){
+
+                    if(relationships[j].equals(entityMatchClass[w])){
+
+                        if(posColData[j] == null ||
+                                !posColData[j].hasEntity()){
+
+                            posColData[j] = new PositionCollisionData();
+
+                            double[] distance = new double[3];
+
+                            if(checkPositionProximity(
+                                    entity,
+                                    entityMatch,
+                                    model,
+                                    xPosValues[checkIndex],
+                                    yPosValues[checkIndex],
+                                    zPosValues[checkIndex],
+                                    posTolerance[checkIndex],
+                                    targetAdjustmentAxis[checkIndex],
+                                    distance)){
+
+                                posColData[j].setEntity(entityMatch);
+                                posColData[j].setDistance(distance);
+                                posColData[j].setAdjustmentAxis(
+                                        targetAdjustmentAxis[startPosIndex+j]);
+
+                            }
+
+                        } else {
+
+                            double[] distance = new double[3];
+
+                            if(checkPositionProximity(
+                                    entity,
+                                    entityMatch,
+                                    model,
+                                    xPosValues[checkIndex],
+                                    yPosValues[checkIndex],
+                                    zPosValues[checkIndex],
+                                    posTolerance[checkIndex],
+                                    targetAdjustmentAxis[checkIndex],
+                                    distance)){
+
+                                double[] existingDistance = new double[3];
+
+                                posColData[j].getDistance(existingDistance);
+
+                                Vector3d existingVec = new Vector3d(existingDistance);
+                                Vector3d newVec = new Vector3d(distance);
+
+                                if (newVec.length() < existingVec.length()) {
+
+                                    posColData[j].setEntity(entityMatch);
+                                    posColData[j].setDistance(distance);
+                                    posColData[j].setAdjustmentAxis(
+                                            targetAdjustmentAxis[startPosIndex+j]);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Make sure all spots have been filled. It is possible that this could
+        // happen in which case we return null. Remove null entries that were
+        // created when no position requirement is required.
+        int dataSetSize = 0;
+
+        for(int j = 0; j < posColData.length; j++){
+
+            if (posColData[j] == null) {
+
+                continue;
+            }
+
+            dataSetSize++;
+        }
+
+        PositionCollisionData[] finalPosColData =
+            new PositionCollisionData[dataSetSize];
+
+        int copyIndex = 0;
+
+        for(int i = 0; i < posColData.length; i++){
+
+            if (posColData[i] == null) {
+                continue;
+            }
+
+            if (!posColData[i].hasEntity()) {
+                return null;
+            }
+
+            posColData[i].performCanMoveEntityCheck(model, entity);
+
+            finalPosColData[copyIndex] = posColData[i];
+            copyIndex++;
+        }
+
+        return finalPosColData;
+
+    }
+
+    /**
+     * Performs a check to make sure the change of position doesn't move the
+     * child outside the parent bounds on the axis of adjustment. Does not
+     * consider full bounds space.
+     *
+     * @param model WorldModel to reference
+     * @param pcd PositionCollisionData to examine
+     * @param endPosition End position for entity referenced in pcd
+     * @return True if still inside parent bounds, false otherwise
+     */
+/*  private boolean performParentBoundsCheck(
+            WorldModel model,
+            PositionCollisionData pcd,
+            double[] endPosition){
+
+        Entity entity = pcd.getEntity();
+        int parentEntityID = entity.getParentEntityID();
+        Entity parentEntity = model.getEntity(parentEntityID);
+
+        if(!(parentEntity instanceof PositionableEntity)){
+
+            System.out.println("Bad news, we cannot get a position for parent");
+            return false;
+        }
+
+        float[] parentBounds = new float[6];
+        float[] colEntityBounds = new float[6];
+        ((PositionableEntity)parentEntity).getBounds(parentBounds);
+        ((PositionableEntity)parentEntity).getBounds(colEntityBounds);
+
+        switch(pcd.getAdjustmentAxis()){
+
+            case XAXIS:
+
+                if(parentBounds[0] > (colEntityBounds[0] + endPosition[0])){
+                    return false;
+                } else if (parentBounds[1] < (colEntityBounds[1] + endPosition[0])){
+                    return false;
+                }
+
+                break;
+
+            case YAXIS:
+
+                if(parentBounds[2] > (colEntityBounds[2] + endPosition[1])){
+                    return false;
+                } else if (parentBounds[3] > (colEntityBounds[3] + endPosition[1])){
+                    return false;
+                }
+
+                break;
+
+            case ZAXIS:
+
+                if(parentBounds[4] > (colEntityBounds[4] + endPosition[2])){
+                    return false;
+                } else if (parentBounds[5] > (colEntityBounds[5] + endPosition[2])){
+                    return false;
+                }
+
+                break;
+
+            default:
+                System.out.println("Bad news, could not determine adjustment axis");
+                return false;
+        }
+
+        return true;
+    }
+*/
+
+    /**
+     * Perform the span check against nearest neighbors of the same type to
+     * ensure safe installation is preserved.
+     *
+     * @param model WorldModel to reference
+     * @param pcd PositionCollisionData to examine
+     * @param startPosition Starting position
+     * @param endPosition Ending position
+     * @return True if span requirements are preserved, false otherwise
+     */
+/*  private boolean performSpanCheck(
+            WorldModel model,
+            PositionCollisionData pcd,
+            double[] startPosition,
+            double[] endPosition){
+
+        // Need to ensure that the requisite span space is preserved and
+        // not allow placement if the standard cannot be adjusted correctly.
+        ArrayList<Entity> negNeighbors = new ArrayList<Entity>();
+        ArrayList<Entity> posNeighbors = new ArrayList<Entity>();
+        Entity colEntity = pcd.getEntity();
+
+        switch(pcd.getAdjustmentAxis()){
+
+        case XAXIS:
+            negNeighbors =
+                getNegativeXNeighbors(
+                        model,
+                        (PositionableEntity) colEntity,
+                        colEntity.getName());
+
+            posNeighbors =
+                getPositiveXNeighbors(
+                        model,
+                        (PositionableEntity) colEntity,
+                        colEntity.getName());
+            break;
+
+        case YAXIS:
+            negNeighbors =
+                getNegativeYNeighbors(
+                        model,
+                        (PositionableEntity) colEntity,
+                        colEntity.getName());
+
+            posNeighbors =
+                getPositiveYNeighbors(
+                        model,
+                        (PositionableEntity) colEntity,
+                        colEntity.getName());
+            break;
+
+        case ZAXIS:
+
+            errorReporter.debugReport(
+                    "No implementation for ZAXIS nearest neighbor: "+
+                    "InstallPositionRequirementRule",
+                    null);
+            return false;
+
+        default:
+            return false;
+        }
+
+        int parentEntityID = colEntity.getParentEntityID();
+        Entity parentEntity = model.getEntity(parentEntityID);
+        float maxStepSize = 0.0f;
+
+        String[] autoPlaceChildren =
+            (String[])
+            parentEntity.getProperty(Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.AUTO_PLACE_OBJECT_TOOLS_PROP);
+
+        if(autoPlaceChildren != null){
+
+            boolean stepSizeObtained = false;
+
+            for(int j = 0; j < autoPlaceChildren.length; j++){
+
+                if(autoPlaceChildren[j].equals(colEntity.getName())){
+
+                    float[] stepSize = (float[]) parentEntity.getProperty(
+                            Entity.DEFAULT_ENTITY_PROPERTIES,
+                            ChefX3DRuleProperties.AUTO_ADD_STEP_SIZE);
+
+                    maxStepSize = stepSize[j];
+                    stepSizeObtained = true;
+                    break;
+
+                }
+            }
+
+            if(!stepSizeObtained){
+                System.out.println("unable to match step size for product");
+                return false;
+            }
+
+        } else {
+
+            System.out.println("Unable to determine step requirement");
+            return false;
+        }
+
+        Entity posEntity = null;
+        Entity negEntity = null;
+
+        if(posNeighbors.size() > 0){
+            posEntity = posNeighbors.get(0);
+        }
+
+        if(negNeighbors.size() > 0){
+            negEntity = negNeighbors.get(0);
+        }
+
+        Entity parentZoneEntity =
+            getParentZoneEntity(model, colEntity);
+
+        ((PositionableEntity)colEntity).setPosition(endPosition, false);
+
+        double[] colEntityPos =
+            getRelativePosition(model, colEntity, parentZoneEntity, false);
+
+        ((PositionableEntity)colEntity).setPosition(startPosition, false);
+
+        // Perform the actual check of span distance based on available
+        // nearest neighbors
+        if(posEntity == null && negEntity != null){
+
+            Entity negParentZoneEntity =
+                getParentZoneEntity(model, negEntity);
+
+            double[] negPos =
+                getRelativePosition(
+                        model,
+                        negEntity,
+                        negParentZoneEntity,
+                        false);
+
+            Vector3d  negEntityVec = new Vector3d(
+                    negPos[0] - colEntityPos[0],
+                    negPos[1] - colEntityPos[1],
+                    negPos[2] - colEntityPos[2]);
+
+            if(negEntityVec.length() > maxStepSize){
+                System.out.println("No go - nearest negative neighbor is too far away");
+                return false;
+            }
+
+        } else if (posEntity != null && negEntity == null){
+
+            Entity posParentZoneEntity =
+                getParentZoneEntity(model, posEntity);
+
+            double[] posPos =
+                getRelativePosition(
+                        model,
+                        posEntity,
+                        posParentZoneEntity,
+                        false);
+
+            Vector3d  posEntityVec = new Vector3d(
+                    posPos[0] - colEntityPos[0],
+                    posPos[1] - colEntityPos[1],
+                    posPos[2] - colEntityPos[2]);
+
+            if(posEntityVec.length() > maxStepSize){
+                System.out.println("No go - nearest positive neighbor is too far away");
+                return false;
+            }
+
+        } else if (posEntity != null && negEntity != null){
+
+            Entity posParentZoneEntity =
+                getParentZoneEntity(model, posEntity);
+
+            Entity negParentZoneEntity =
+                getParentZoneEntity(model, negEntity);
+
+            double[] posPos =
+                getRelativePosition(
+                        model,
+                        posEntity,
+                        posParentZoneEntity,
+                        false);
+
+            double[] negPos =
+                getRelativePosition(
+                        model,
+                        negEntity,
+                        negParentZoneEntity,
+                        false);
+
+            Vector3d  posEntityVec = new Vector3d(
+                    posPos[0] - colEntityPos[0],
+                    posPos[1] - colEntityPos[1],
+                    posPos[2] - colEntityPos[2]);
+
+            Vector3d  negEntityVec = new Vector3d(
+                    negPos[0] - colEntityPos[0],
+                    negPos[1] - colEntityPos[1],
+                    negPos[2] - colEntityPos[2]);
+
+            if(posEntityVec.length() > maxStepSize){
+                System.out.println("No go - nearest positive neighbor is too far away");
+                return false;
+            }
+
+            if(negEntityVec.length() > maxStepSize){
+                System.out.println("No go - nearest negative neighbor is too far away");
+                return false;
+            }
+
+        } else {
+
+            System.out.println("Unexpected case where there are no nearest neighbors");
+            return false;
+        }
+
+        return true;
+    }
+*/
+
+    /**
+     * Create the list of move commands to execute on collision entities.
+     * If there was an issue with the generation of the commands then null
+     * will be returned indicating that the process should not continue. An
+     * example would be a resulting illegal condition from moving one of the
+     * collision entities. We cannot cause illegal conditions so therefore we
+     * stop further processing on the original command and reject it.
+     *
+     * @param model WorldModel to reference
+     * @param entityToIgnore The entity being moved by the user to ignore
+     * @param posColData PositionCollisionData array to evaluate
+     * @param fixedEntityAdjustment Fixed entity adjustment to consider
+     * @return ArrayList<Command> if successful, otherwise null
+     */
+    private ArrayList<Command> updateCollisionPositions(
+            WorldModel model,
+            Entity entityToIgnore,
+            PositionCollisionData[] posColData,
+            double[] fixedEntityAdjustment){
+
+        ArrayList<Command> cmdList = new ArrayList<Command>();
+
+
+        // Update all positions relative to fixed entity
+        for(int i = 0; i < posColData.length; i++){
+
+            // If this is the fixed entity, skip it
+            if(posColData[i].isFixedEntity()){
+
+                continue;
+            }
+
+            double[] distance = new double[3];
+
+            Entity colEntity = posColData[i].getEntity();
+            posColData[i].getDistance(distance);
+
+            // Adjust distance value based on fixed entity if exists
+            distance[0] -= fixedEntityAdjustment[0];
+            distance[1] -= fixedEntityAdjustment[1];
+            distance[2] -= fixedEntityAdjustment[2];
+
+            // Constraint distance to axis of adjustment
+            ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS axis =
+                posColData[i].getAdjustmentAxis();
+
+            switch (axis) {
+
+            case XAXIS:
+                distance[1] = 0.0;
+                distance[2] = 0.0;
+                break;
+
+            case YAXIS:
+                distance[0] = 0.0;
+                distance[2] = 0.0;
+                break;
+
+            case ZAXIS:
+                distance[0] = 0.0;
+                distance[1] = 0.0;
+                break;
+            }
+
+            // Confirm new position wouldn't result in illegal collisions
+            double[] startPosition = new double[3];
+            double[] endPosition = new double[3];
+            ((PositionableEntity)colEntity).getPosition(startPosition);
+
+            endPosition[0] = startPosition[0] - distance[0];
+            endPosition[1] = startPosition[1] - distance[1];
+            endPosition[2] = startPosition[2] - distance[2];
+
+            // Run the baseline collision check
+            MoveEntityCommand baselineCmd =
+                new MoveEntityCommand(
+                        model,
+                        model.issueTransactionID(),
+                        colEntity.getEntityID(),
+                        startPosition,
+                        startPosition);
+
+            performCollisionCheck(baselineCmd);
+
+            int ignoreListSize = collisionEntities.size();
+
+            if (entityToIgnore != null) {
+                ignoreListSize++;
+            }
+
+            int[] idsToIgnore = new int[ignoreListSize];
+
+            for (int j = 0; j < collisionEntities.size(); j++) {
+                idsToIgnore[j] = collisionEntities.get(j).getEntityID();
+            }
+
+            if (entityToIgnore != null) {
+                idsToIgnore[idsToIgnore.length-1] = entityToIgnore.getEntityID();
+            }
+
+            // Run the official collision check
+            MoveEntityCommand mvCmd =
+                new MoveEntityCommand(
+                        model,
+                        model.issueTransactionID(),
+                        colEntity.getEntityID(),
+                        endPosition,
+                        startPosition);
+
+            performCollisionCheck(mvCmd);
+
+            if(!performCollisionAnalysisHelper(
+                    colEntity,
+                    null,
+                    false,
+                    idsToIgnore,
+                    true)){
+
+                return null;
+            }
+
+            if(hasIllegalCollisionHelper(colEntity)){
+
+                return null;
+            }
+
+            // Confirm that we still respect the bounds of the parent along the
+            // adjustment axis.
+            float[] bounds = new float[6];
+            ((PositionableEntity)colEntity).getBounds(bounds);
+
+            Entity parentEntity =
+                model.getEntity(colEntity.getParentEntityID());
+
+            double[] parentPosition = new double[3];
+            float[] parentBounds = new float[6];
+
+            parentPosition = getPositionRelativeToZone(model, parentEntity);
+            ((PositionableEntity)parentEntity).getBounds(parentBounds);
+
+            double maxChildBounds;
+            double minChildBounds;
+            double maxParentBounds;
+            double minParentBounds;
+
+            switch (axis) {
+
+            case XAXIS:
+
+                maxChildBounds = parentPosition[0]+endPosition[0]+bounds[1];
+                minChildBounds = parentPosition[0]+endPosition[0]+bounds[0];
+
+                maxParentBounds = parentPosition[0] + parentBounds[1];
+                minParentBounds = parentPosition[0] + parentBounds[0];
+
+                if (maxChildBounds > maxParentBounds) {
+                    return null;
+                } else if (minChildBounds < minParentBounds) {
+                    return null;
+                }
+
+                break;
+
+            case YAXIS:
+
+                maxChildBounds = parentPosition[1]+endPosition[1]+bounds[3];
+                minChildBounds = parentPosition[1]+endPosition[1]+bounds[2];
+
+                maxParentBounds = parentPosition[1] + parentBounds[3];
+                minParentBounds = parentPosition[1] + parentBounds[2];
+
+                if (maxChildBounds > maxParentBounds) {
+                    return null;
+                } else if (minChildBounds < minParentBounds) {
+                    return null;
+                }
+
+                break;
+
+            case ZAXIS:
+
+                maxChildBounds = parentPosition[2]+endPosition[2]+bounds[5];
+                minChildBounds = parentPosition[2]+endPosition[2]+bounds[4];
+
+                maxParentBounds = parentPosition[2] + parentBounds[5];
+                minParentBounds = parentPosition[2] + parentBounds[4];
+
+                if (maxChildBounds > maxParentBounds) {
+                    return null;
+                } else if (minChildBounds < minParentBounds) {
+                    return null;
+                }
+
+                break;
+            }
+
+/*
+
+At this time, I am not convinced that there is any product that could be placed
+That would result in an adjustment that would end up being illegal so the need
+to utilize this check is not apparent. Will leave in this call and the base
+implementation in case I am wrong. If I am wrong we will need to update this
+to do the analysis on the final set of position data. The current implementation
+is incorrect in this regard.
+
+            // Make sure the change in position doesn't violate span
+            // requirements
+            if(!performSpanCheck(model, posColData[i], startPosition, endPosition)){
+
+                return null;
+            }
+*/
+
+            // Add move command to new list
+            cmdList.add(mvCmd);
+
+        }
+
+        return cmdList;
+    }
+
+    /**
+     * Calculates standard deviation for a set of values.
+     *
+     * @param values Set of values (population)
+     * @return Standard deviation of the population
+     */
+    private double standardDeviation(double[] values) {
+
+        double deviation = 0.0;
+
+        // Null check
+        if (values == null || values.length == 0) {
+            return Double.MAX_VALUE;
+        }
+
+        // calculate average (mean)
+        double average = 0.0;
+
+        for (int i = 0; i < values.length; i++) {
+
+            average = average + values[i];
+        }
+
+        average = average/values.length;
+
+        // compute the difference from the average (mean)
+        double populationStandardDeviation = 0.0;
+
+        for (int i = 0; i < values.length; i++) {
+
+            populationStandardDeviation =
+                populationStandardDeviation +
+                Math.pow((values[i] - average), 2);
+        }
+
+        deviation =
+            populationStandardDeviation / values.length;
+
+        deviation = Math.sqrt(deviation);
+
+        return deviation;
+    }
+
+    /**
+     * Given a set of PositionCollisionData determine if a possible snap to
+     * operation can occur and update the endPos value with the adjustment.
+     * Used by add command and move transient command cases.
+     *
+     * @param posColData PositionCollisionData array to analyze
+     * @param endPos Position to update with adjustment if possible
+     * @return True if adjustment made, false otherwise
+     */
+    private boolean attemptToSnapToPositions(
+            PositionCollisionData[] posColData,
+            double[] endPos){
+
+        // Verify the axis specific adjustment values are within acceptable
+        // range for adjustment calculation. For transient movement to lock in
+        // and adjust the command, we need to have an average adjustment
+        // standard deviation of < MAX_ADJ_OFFSET_DIFFERENTIAL.
+        //
+        // Also, all adjustments will need to be along the same axis for the
+        // adjustment to be made.
+
+        ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS adjAxis = null;
+        double[] axisPosValues = new double[posColData.length];
+
+        for(int i = 0; i < posColData.length; i++){
+
+            ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS tmpAdjAxis;
+            double[] tmpOffset = new double[3];
+
+            posColData[i].getDistance(tmpOffset);
+            tmpAdjAxis = posColData[i].getAdjustmentAxis();
+
+            // Make sure same axis
+            if (i == 0) {
+                adjAxis = tmpAdjAxis;
+            } else if (adjAxis != tmpAdjAxis) {
+                return true;
+            }
+
+            switch (adjAxis) {
+
+            case XAXIS:
+                axisPosValues[i] = tmpOffset[0];
+                break;
+
+            case YAXIS:
+                axisPosValues[i] = tmpOffset[1];
+                break;
+
+            case ZAXIS:
+                axisPosValues[i] = tmpOffset[2];
+                break;
+            }
+        }
+
+        double deviation = standardDeviation(axisPosValues);
+
+        if (deviation > MAX_ADJ_OFFSET_DEVIATION) {
+            return false;
+        }
+
+        // Determine the average offset
+        double averageOffset = 0.0;
+
+        for (int i = 0; i < axisPosValues.length; i++) {
+            averageOffset = averageOffset + axisPosValues[i];
+        }
+
+        averageOffset = averageOffset / axisPosValues.length;
+
+        // Update position based on targetAdjustmentAxis
+
+        switch (adjAxis) {
+        case XAXIS:
+            endPos[0] = endPos[0] + averageOffset;
+            break;
+
+        case YAXIS:
+            endPos[1] = endPos[1] + averageOffset;
+            break;
+
+        case ZAXIS:
+            endPos[2] = endPos[2] + averageOffset;
+            break;
+        }
+
+        return true;
+    }
+
+
+    //--------------------------------------------------------------------
+    // Inner class definition
+    //--------------------------------------------------------------------
+
+
+    /**
+     * Private class for tracking entity to position data
+     *
+     * @author Ben Yarger
+     */
+    private class PositionCollisionData{
+
+        /** Entity collided with that may or may not be adjustable */
+        private Entity entity;
+
+        /** Distance to move the product to get it to line up */
+        private double[] distance;
+
+        /** Flag to determine if entity can be moved or is fixed */
+        private boolean canBeMoved;
+
+        /** Quick flag check to see if distance to move is 0 */
+        private boolean adjustmentNeeded;
+
+        /** Axis any adjustment should occur along */
+        private ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS adjAxis;
+
+        /**
+         * Constructor
+         *
+         * @param entity Entity to track
+         * @param distance Distance to move entity
+         * @param adjAxis Axis along which adjustments should be made
+         */
+        PositionCollisionData(Entity entity, double[] distance, Enum adjAxis){
+
+            this.distance = new double[3];
+
+            this.setEntity(entity);
+            this.setDistance(distance);
+            this.setAdjustmentAxis(adjAxis);
+
+            canBeMoved = false;
+        }
+
+        /**
+         * Default constructor
+         */
+        PositionCollisionData(){
+
+            this(null, null, null);
+        }
+
+        /**
+         * Set the entity
+         *
+         * @param entity Entity to store
+         */
+        public void setEntity(Entity entity){
+
+            this.entity = entity;
+        }
+
+        /**
+         * Get the entity stored
+         *
+         * @return Entity
+         */
+        public Entity getEntity(){
+
+            return entity;
+        }
+
+        /**
+         * See if the entity is stored
+         *
+         * @return True if stored, false otherwise
+         */
+        public boolean hasEntity(){
+
+            if(entity != null){
+                return true;
+            } else {
+                return false;
+            }
+        }
+
+        /**
+         * Set the distance relative to the position requirement
+         *
+         * @param distance distance from position requirement to store
+         */
+        public void setDistance(double[] distance){
+
+            if (distance == null) {
+
+                this.distance[0] = 0.0;
+                this.distance[1] = 0.0;
+                this.distance[2] = 0.0;
+
+            } else {
+
+                this.distance[0] = distance[0];
+                this.distance[1] = distance[1];
+                this.distance[2] = distance[2];
+
+            }
+
+            // If magically, no adjustment is needed then set the flag
+            if(this.distance[0] == 0.0 &&
+                    this.distance[1] == 0.0 &&
+                    this.distance[2] == 0.0){
+
+                adjustmentNeeded = false;
+            } else {
+                adjustmentNeeded = true;
+            }
+        }
+
+        /**
+         * Set the distance relative to the position requirement
+         *
+         * @param distance distance from position requirement to send back
+         */
+        public void getDistance(double[] distance){
+
+            distance[0] = this.distance[0];
+            distance[1] = this.distance[1];
+            distance[2] = this.distance[2];
+        }
+
+        /**
+         * Set the adjustment axis value
+         *
+         * @param adjAxis Adjustment axis enum value
+         */
+        public void setAdjustmentAxis(Enum adjAxis){
+
+            this.adjAxis =
+                (ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS)
+                adjAxis;
+        }
+
+        /**
+         * Get the adjustment axis
+         *
+         * @return POSITION_TARGET_ADJUSTMENT_AXIS Enum value
+         */
+        public ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS
+        getAdjustmentAxis(){
+
+            return adjAxis;
+        }
+
+        /**
+         * Determine if an adjustment to the entity is needed to satisfy
+         * the position requirement.
+         *
+         * @return True if adjustment is needed, false otherwise
+         */
+        public boolean isAdjustmentNeeded(){
+            return adjustmentNeeded;
+        }
+
+        /**
+         * Determine if the entity can be moved by the position requirement
+         * adjustment algorithm.
+         *
+         * @return True if can be moved, false otherwise.
+         */
+        public boolean isFixedEntity(){
+            return !canBeMoved;
+        }
+
+        /**
+         * Perform can move entity check. Only case where canBeMoved will be
+         * set to true is if the only model entities found in collision are
+         * auto place entities. Or if the entity places the auto place
+         * products. The samplingEntity passed in is the entity being acted
+         * on by the user that should be removed from the list of collision
+         * entities found during analysis.
+         *
+         * @param model WorldModel to reference
+         * @param samplingEntity Entity being adjusted by user, to be ignored
+         * in collision analysis
+         */
+        public void performCanMoveEntityCheck(
+                WorldModel model,
+                Entity samplingEntity){
+
+            double[] position = new double[3];
+
+            if(entity instanceof PositionableEntity){
+
+                ((PositionableEntity)entity).getPosition(position);
+
+            } else {
+
+                canBeMoved = false;
+                return;
+            }
+
+            MoveEntityCommand mvCmd =
+                new MoveEntityCommand(
+                        model,
+                        0,
+                        entity.getEntityID(),
+                        position,
+                        position);
+
+            performCollisionCheck(mvCmd);
+
+            if(!performCollisionAnalysisHelper(
+                    entity,
+                    null,
+                    false,
+                    new int[] {samplingEntity.getEntityID()},
+                    false)){
+
+                canBeMoved = false;
+                return;
+            }
+
+            // Using nearest neighbor check check for end cases. An end case is
+            // an entity that has no nearest neighbors on one side of it.
+// DELETE this comment block AFTER 1.4.1 release!!!!!!!
+/*          ArrayList<Entity> posNeighbors = new ArrayList<Entity>();
+            ArrayList<Entity> negNeighbors = new ArrayList<Entity>();
+
+            switch (adjAxis) {
+
+            case XAXIS:
+                posNeighbors =
+                    getPositiveXNeighbors(
+                            model,
+                            (PositionableEntity) entity,
+                            entity.getName(),
+                            null);
+
+                negNeighbors =
+                    getNegativeXNeighbors(
+                            model,
+                            (PositionableEntity) entity,
+                            entity.getName(),
+                            null);
+                break;
+
+            case YAXIS:
+
+                posNeighbors =
+                    getPositiveYNeighbors(
+                            model,
+                            (PositionableEntity) entity,
+                            entity.getName(),
+                            null);
+
+                negNeighbors =
+                    getNegativeYNeighbors(
+                            model,
+                            (PositionableEntity) entity,
+                            entity.getName(),
+                            null);
+
+                break;
+
+            }
+
+            if (posNeighbors == null || posNeighbors.size() == 0) {
+
+                canBeMoved = false;
+                return;
+
+            } else if (negNeighbors == null || negNeighbors.size() == 0) {
+
+                canBeMoved = false;
+                return;
+            }
+*/
+            // Only circumstance where it can be moved is if it is only
+            // colliding with its parent entity
+            if (entityMatches.size() == 1) {
+
+                Entity tmpEntity = entityMatches.get(0);
+
+                if(entity.getParentEntityID() == tmpEntity.getEntityID()){
+
+                    canBeMoved = true;
+                    return;
+                }
+            }
+
+            canBeMoved = false;
+        }
+    }
+}

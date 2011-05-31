@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+      <ChefX3D>
+         <EntityParams>
+            <Sheet name="SMAL">
+               <EntityDefinition>
+                  <Fence panelAppearance="0" panelRailAppearance="2" panelTopAppearance="4" postAppearance="2" postTopAppearance="2" stepped="false"/>
+                  <Panel panelHeight="2" panelTopHeight="0.3"/>
+               </EntityDefinition>
+            </Sheet>
+         </EntityParams>
+         <ToolParams entityID="1" name="New Fence" type="TYPE_MULTI_SEGMENT_CREATE" url="&#34;build/catalog/Barriers/Fence/FencePrototype.x3dv&#34;">
+            <Transform rotation="0.0 1.0 0.0 0.0" translation="0.0 0.0 0.0"/>
+            <Segments>
+               <Segment center="-671.7440000000006 0.0 -1146.88"
+                        end="-491.52000000000044 0.0 -802.8159999999998"
+                        endId="1"
+                        rotation="0 1 0 2.0533097"
+                        start="-851.9680000000008 0.0 -1490.9440000000004"
+                        startId="0">
+                  <SegmentParams/>
+                  <StartVertexParams>
+                     <Sheet name="Vertex">
+                        <VertexDefinition>
+                           <Vertex postBraced="false" postSize="0.1 2 0.1" postTopSize="0.1 0.3 0.1" postTopType="0" postType="0"/>
+                        </VertexDefinition>
+                     </Sheet>
+                  </StartVertexParams>
+                  <EndVertexParams>
+                     <Sheet name="Vertex">
+                        <VertexDefinition>
+                           <Vertex postBraced="false" postSize="0.1 2 0.1" postTopSize="0.1 0.3 0.1" postTopType="0" postType="0"/>
+                        </VertexDefinition>
+                     </Sheet>
+                  </EndVertexParams>
+               </Segment>
+            </Segments>
+         </ToolParams>
+      </ChefX3D>

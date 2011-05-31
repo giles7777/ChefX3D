@@ -1,0 +1,2665 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+import java.util.ArrayList;
+import java.util.Arrays;
+
+//Internal Imports
+import org.chefx3d.model.*;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+import org.chefx3d.tool.SimpleTool;
+
+/**
+ * Auto add children to product depending on children rules. Results from
+ * Move commands.
+ *
+ * @author Ben Yarger
+ * @version $Revision: 1.48 $
+ */
+public class ScaleAutoAddRule extends AutoAddRule {
+
+    /** Flag if the scale has been clamped because of collision */
+    private static boolean SCALE_CLAMP_APPLIED = false;
+
+    /** Required distance between outside auto place products */
+    private static final double MIN_SPACE = 0.005;
+
+    /** Size of separation between collision found for auto placing parent */
+    private static final float COLLISION_SEPARATION = 0.01f;
+
+    /** Scale problem pop up message relating to auto add */
+    private static final String POP_UP_NO_SCALE =
+        "org.chefx3d.rules.definitions.ScaleAutoAddRule.scaleCanceled";
+
+    /** Scale has been clamped because of collisions */
+    private static final String STATUS_BAR_SCALE_CLAMPED =
+        "org.chefx3d.rules.definitions.ScaleAutoAddRule.scaleClamped";
+
+    /** Static class instance */
+    private static ScaleAutoAddRule rule =
+        new ScaleAutoAddRule();
+
+    /**
+     * Private constructor. All Rule classes should be implemented this way.
+     */
+    private ScaleAutoAddRule(){
+
+        ruleType = RULE_TYPE.STANDARD;
+    }
+
+    /**
+     * Return class instance
+     * @return CanRotateRule
+     */
+    public static ScaleAutoAddRule getInstance(){
+        return rule;
+    }
+
+    @Override
+    protected boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command) {
+
+        SCALE_CLAMP_APPLIED = false;
+
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        multiCmdList = updateAutoPlaceChildren(model, entity, command);
+
+        // If any of the command slots are null, it is because there was some
+        // event that prevented the auto add item. If this is the case, we do
+        // not allow the command.
+        for(int i = 0; i < multiCmdList.size(); i++) {
+
+            if (multiCmdList.get(i) == null) {
+                ((RuleDataAccessor)command).resetToStart();
+                String msg = intl_mgr.getString(POP_UP_NO_SCALE);
+                popUpMessage.showMessage(msg);
+                return true;
+            }
+        }
+
+        ArrayList<Command> autoAddEndList =
+            updateAutoAddEndProduct(entity, model, command);
+
+        multiCmdList.addAll(autoAddEndList);
+
+        addNewlyIssuedCommand(multiCmdList);
+
+        if (SCALE_CLAMP_APPLIED) {
+
+            String msg = intl_mgr.getString(STATUS_BAR_SCALE_CLAMPED);
+            statusBar.setMessage(msg);
+        }
+
+        return SCALE_CLAMP_APPLIED;
+    }
+
+    /**
+     * Accessor method for other rules to use same routines as normal rule
+     * processing of this rule.
+     *
+     * @param model WorldModel
+     * @param parentEntity Entity being scaled that may have auto place childs
+     * @param command Scale*Command
+     * @return ArrayList<Command>
+     */
+    public ArrayList<Command> pipeInRelatedRuleAccess(
+            WorldModel model,
+            Entity parentEntity,
+            Command command){
+
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        multiCmdList = updateAutoPlaceChildren(model, parentEntity, command);
+
+        return multiCmdList;
+    }
+
+    //-------------------------------------------------------------------------
+    //-------------------------------------------------------------------------
+    // Private methods
+    //-------------------------------------------------------------------------
+    //-------------------------------------------------------------------------
+
+    /**
+     * Update other existing children and add or remove as needed.
+     *
+     * @param model
+     * @param parentEntity
+     * @param command
+     * @return ArrayList<Command> list of adjustment commands
+     */
+    private ArrayList<Command> updateAutoPlaceChildren(
+            WorldModel model,
+            Entity parentEntity,
+            Command command){
+
+        //
+        // EMF: All the new properties that have just been added.
+        //
+        // Ben writes:
+        //
+        // NOTE: THE KEY TO THIS WORKING IS THE ORDERING
+        // REQUIREMENT THAT ALL AUTO PLACE DATA SETS
+        // MATCH THE ORDER OF THE CX.autoPlObj DATA SET.
+        //
+        // To emphasize the point, CX.autoAddAxis, CX.autoAddNegOffset,
+        // CX.autoAddPosOffset and CX.autoAddStepSize are matched by
+        // index to the CX.autoPlObj listing.
+        //
+        String[] autoPlaceObjectsProp = (String[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_PLACE_OBJECTS_PROP);
+
+        float[] autoAddStepSize = (float[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_STEP_SIZE);
+
+        Enum[] autoAddAxis = (Enum[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_AXIS);
+
+        float[] autoAddNegOffset = (float[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_NEG_OFFSET);
+
+        float[] autoAddPosOffset = (float[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_POS_OFFSET);
+
+
+        //
+        // Is the collision case set?  If so,
+        // we need to add an option to auto place at
+        // every collision with a specific entity as
+        // an alternate auto place algorithm.
+        //
+        Boolean autoAddByCol = (Boolean)
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_BY_COL);
+
+        // Is this a auto add N case set?
+        Boolean addNUnits =
+            (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                    parentEntity,
+                    ChefX3DRuleProperties.ADD_N_UNITS_PROP);
+
+        // Force fit operation that will attempt to place the auto add product
+        // to the immediate left and right of the collision found
+        int[] forceFitFlags = (int[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_FORCE_FIT);
+
+
+        //
+        // defensive coding: check if we should break early
+        // in case the required properties are not set
+        //
+        // Also break early if auto add n units are used. We make no
+        // adjustments for this case.
+        //
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        if( addNUnits == true ||
+                autoPlaceObjectsProp == null ||
+                autoAddStepSize == null ||
+                autoAddAxis == null ||
+                autoAddPosOffset == null ||
+                autoAddNegOffset == null) {
+
+            return multiCmdList;
+        }
+
+        // working variable
+        ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS adjAxis;
+
+        //
+        // Generate a command for each auto placement and add it to multiCmdList
+        //
+        for(int i = 0; i < autoPlaceObjectsProp.length; i++){
+
+            SimpleTool simpleTool =
+                getSimpleToolByName(autoPlaceObjectsProp[i]);
+
+            adjAxis = (ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS)
+            autoAddAxis[i];
+
+            boolean forceFit = false;
+
+            if (forceFitFlags != null) {
+
+                if (forceFitFlags[i] == 1) {
+
+                    forceFit = true;
+                }
+            }
+
+            // Make sure we are not performing a scale that will blow up because
+            // of illegal collisions.
+            performScaleCollisionAdjustment(
+                    command,
+                    model,
+                    adjAxis);
+
+            //
+            // special handling if we are adding by collision
+            //
+            if(autoAddByCol){
+                ArrayList<Entity> childList = parentEntity.getChildren();
+
+                //
+                // create a remove command
+                // to remove all autoAddByCollision objects
+                //
+                int len = childList.size();
+                if (len > 0) {
+                    ArrayList<Command> removeCmds = new ArrayList<Command>();
+                    for(int j = len - 1; j >= 0; j--) {
+                        Entity child = childList.get(j);
+
+                        // Do not remove invisible children
+                       Boolean noModel =
+                           (Boolean) RulePropertyAccessor.getRulePropertyValue(
+                                   child,
+                                   ChefX3DRuleProperties.NO_MODEL_PROP);
+
+                       if (noModel) {
+                           continue;
+                       }
+
+                       // Only remove auto added children
+                       Boolean isAutoAdd =
+                           (Boolean) RulePropertyAccessor.getRulePropertyValue(
+                                   child,
+                                   ChefX3DRuleProperties.IS_AUTO_ADD_PRODUCT);
+
+                       if (isAutoAdd == null ||
+                               !isAutoAdd) {
+                           continue;
+                       }
+
+                       // Remove the child
+                        RemoveEntityChildCommand removeCmd =
+                            new RemoveEntityChildCommand(model, parentEntity, child);
+                        removeCmds.add(removeCmd);
+                    }
+                    if (removeCmds.size() > 0) {
+                        MultiTransientCommand multiCmd =
+                            new MultiTransientCommand(removeCmds, "auto-add removal");
+                        model.forceCommandExecution(multiCmd);
+                    }
+                }
+
+                //
+                // now replicate an add command as necessary
+                // to add children to each appropriate collision point
+                //
+                if ( !command.isTransient()){
+
+                    double[] parentEntityPos =
+                        getPositionRelativeToZone(model, parentEntity);
+
+                    multiCmdList.addAll(AddAutoAddRule.getInstance().autoPlace(
+                            adjAxis,
+                            (double) autoAddStepSize[i],
+                            (BasePositionableEntity) parentEntity,
+                            model.getEntity(parentEntity.getParentEntityID()),
+                            simpleTool,
+                            model,
+                            forceFit,
+                            parentEntityPos,
+                            autoAddByCol,
+                            command,
+                            autoAddNegOffset[i],
+                            autoAddPosOffset[i]));
+                }
+            }else {
+                //
+                // "Normal" (non-collision) handling.
+                //
+                // Depending on the value of autoAddAxis[i], this will perform
+                // either horizontal placement - adds products right to left,
+                // vertical placement - add products top to bottom, or
+                // depth placement - add products front to back
+                //
+                ArrayList<Command> addCommands =
+                    (updateChildrenAlongSpan(
+                            adjAxis,
+                            (double)autoAddStepSize[i],
+                            (BasePositionableEntity) parentEntity,
+                            simpleTool,
+                            model,
+                            command,
+                            forceFit,
+                            autoAddNegOffset[i],
+                            autoAddPosOffset[i]));
+
+                //
+                // EMF: If a set of objects could not be placed,
+                // there will be nulls in the addCommands list.
+                //
+                // We DO want multiCmdList to contain null values if no
+                // addCommands could be issued (in order to trigger the
+                // error popupMessage).  But if there are successful add
+                // commands, then we want to remove all the null commands
+                // from the list.
+                //
+                if(multiCmdList.contains(null)){
+                    multiCmdList = addCommands;
+
+                } else if( !addCommands.contains(null)){
+                    multiCmdList.addAll(addCommands);
+                }
+            }
+        }
+
+        return multiCmdList;
+    }
+
+
+    /**
+     * Process each individual child along the specified span axis.
+     *
+     * @param axis TARGET_ADJUSTMENT_AXIS enum value
+     * @param stepSize double step size
+     * @param parentEntity BasePositionableEntity parent to add children to
+     * @param parentEntityParentEntity Parent entity to parentEntity
+     * @param simpleTool SimpleTool to create children with
+     * @param model WorldModel to apply commands
+     * @param command
+     *
+     * @return ArrayList<Command> list of add child commands
+     */
+    private ArrayList<Command> updateChildrenAlongSpan(
+            TARGET_ADJUSTMENT_AXIS axis,
+            double stepSize,
+            BasePositionableEntity parentEntity,
+            SimpleTool simpleTool,
+            WorldModel model,
+            Command command,
+            boolean forceFit,
+            float negativeOffset,
+            float positiveOffset){
+
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        float[] parentNewScale = new float[3];
+        float[] parentStartScale = new float[3];
+        float[] parentSize = new float[3];
+        double[] parentNewPos = new double[3];
+        double[] parentStartPos = new double[3];
+
+        if(command instanceof ScaleEntityCommand){
+
+            ScaleEntityCommand scaleCmd = (ScaleEntityCommand) command;
+            scaleCmd.getNewPosition(parentNewPos);
+            scaleCmd.getOldPosition(parentStartPos);
+            scaleCmd.getNewScale(parentNewScale);
+            scaleCmd.getOldScale(parentStartScale);
+
+        } else if (command instanceof ScaleEntityTransientCommand){
+
+            ScaleEntityTransientCommand scaleTransientCmd =
+                (ScaleEntityTransientCommand) command;
+
+            scaleTransientCmd.getPosition(parentNewPos);
+            scaleTransientCmd.getScale(parentNewScale);
+
+            ((PositionableEntity)scaleTransientCmd.getEntity()).
+            getStartingPosition(parentStartPos);
+
+            ((PositionableEntity)scaleTransientCmd.getEntity()).
+            getStartingScale(parentStartScale);
+
+        } else {
+
+            return multiCmdList;
+        }
+
+        parentEntity.getSize(parentSize);
+
+        // Avoid divide by zero
+        if(stepSize == 0.0){
+            return multiCmdList;
+        }
+
+        //--------------------------------------------------------------------
+        // Get the list of existing children and isolate those matching the
+        // simpleTool by name. Make sure we collect all alternates such as
+        // swapped models from skuX3DChange rule.
+        //
+        // The result is a complete matchedChildren list of entities.
+        //---------------------------------------------------------------------
+
+        // Check for sku3DChange flag to look for alternate children
+        // of the auto added entity tool ID being examined
+        Boolean skuX3DChange = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                simpleTool,
+                ChefX3DRuleProperties.SCALE_CHANGE_MODEL_FLAG);
+
+        // Alternate products to load up matched to size index
+        String[] skuX3DProd = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                simpleTool,
+                ChefX3DRuleProperties.SCALE_CHANGE_MODEL_PROD);
+
+        ArrayList<Entity> parentChildren = parentEntity.getChildren();
+        ArrayList<Entity> matchedChildren = new ArrayList<Entity>();
+        String toolID = simpleTool.getToolID();
+
+        for(Entity childEntity : parentChildren){
+
+            if(toolID.equalsIgnoreCase(childEntity.getToolID())){
+
+                matchedChildren.add(childEntity);
+
+            } else if (skuX3DChange &&
+                    skuX3DProd != null) {
+
+                // See if the product id matches any of the swap alternates
+                for (int i = 0; i < skuX3DProd.length; i++) {
+
+                    if (skuX3DProd[i].equalsIgnoreCase(
+                            childEntity.getToolID())) {
+
+                        matchedChildren.add(childEntity);
+                        break;
+                    }
+                }
+            }
+        }
+
+        //---------------------------------------------------------------------
+        // Determine which end (pos/neg) the scale is occurring on and in which
+        // direction (pos/neg) to know with certainty what scale is occurring.
+        //---------------------------------------------------------------------
+        Boolean isIncreasingScale =
+            isScaleIncreasing(parentNewScale, parentStartScale, axis);
+        Boolean isPositiveDirection =
+            isScaleInPositiveDirection(parentNewPos, parentStartPos, axis);
+
+        if (isIncreasingScale == null ||
+                isPositiveDirection == null) {
+
+            return multiCmdList;
+        }
+
+        // Establish the initial fixed entity correction values.
+        // These will be altered over time as needed, but in the event we have
+        // the simplest adjustment case, we need these default values set.
+        double[] fixedEntityCorrection = new double[3];
+
+        switch(axis){
+
+            case XAXIS:
+
+                fixedEntityCorrection[0] = parentStartPos[0] - parentNewPos[0];
+                break;
+
+            case YAXIS:
+
+                fixedEntityCorrection[1] = parentStartPos[1] - parentNewPos[1];
+                break;
+
+            case ZAXIS:
+
+                fixedEntityCorrection[2] = parentStartPos[2] - parentNewPos[2];
+                break;
+        }
+
+        //---------------------------------------------------------------------
+        // At this point now we are attempting to isolate the fixed entities.
+        // Fixed entities are identified as the first entity in the opposite
+        // direction of the end being scaled that has collision dependent
+        // entities attached to it. All entities found after that are fixed
+        // entities as well. To do this, we need to sort the children as
+        // explained below.
+        //
+        // Determine the starting point for the span space to fill calculation.
+        // We need to understand what the first non-moving auto place product
+        // is in the opposite direction of the scale and have that be the
+        // starting point to begin auto add fill calculations from.
+        // Non-moving auto place products are those with product attached.
+        // Begin by sorting the children by position and then look for first
+        // fixed entity in the list based on scale direction.
+        //---------------------------------------------------------------------
+
+        // Sort the matched children in descending position value order
+        matchedChildren = sortDescendingPosValueOrder(matchedChildren, axis);
+
+        if(matchedChildren == null) {
+            return null;
+        }
+
+        // Perform the scale adjustment check for minimum scale for
+        // auto adding entities. This case looks like two auto added entities
+        // with the minimum allowed spacing between them.
+        performMinimumAutoAddParentScaleCheck(
+                command,
+                axis,
+                matchedChildren,
+                isPositiveDirection,
+                isIncreasingScale);
+
+        // Extract the values again in case they have changed
+        if(command instanceof ScaleEntityCommand){
+
+            ScaleEntityCommand scaleCmd = (ScaleEntityCommand) command;
+            scaleCmd.getNewPosition(parentNewPos);
+            scaleCmd.getNewScale(parentNewScale);
+
+        } else if (command instanceof ScaleEntityTransientCommand){
+
+            ScaleEntityTransientCommand scaleTransientCmd =
+                (ScaleEntityTransientCommand) command;
+
+            scaleTransientCmd.getPosition(parentNewPos);
+            scaleTransientCmd.getScale(parentNewScale);
+
+        }
+
+
+        //---------------------------------------------------------------------
+        // Find the first fixed entity in the other direction.
+        //
+        // This will be stored in firstFixedEntity as well as the first
+        // entity found in the fixedList. The remainder of entities in the
+        // fixed list are all the remaining fixed entities that cannot be
+        // adjusted either.
+        //
+        // The toAdjustList contains all of the entities before the fixed
+        // entity that will need to be adjusted.
+        //---------------------------------------------------------------------
+        PositionableEntity firstFixedEntity = null;
+        ArrayList<Entity> toAdjustList = new ArrayList<Entity>();
+        ArrayList<Entity> fixedList = new ArrayList<Entity>();
+
+        // Look for positive edge scale case first.
+        // Else case is the negative edge scale case.
+        if((isPositiveDirection && isIncreasingScale) ||
+                (!isPositiveDirection && !isIncreasingScale)) {
+
+            for(int i = 0; i < matchedChildren.size(); i++){
+
+                PositionableEntity tmpEntity =
+                    (PositionableEntity)matchedChildren.get(i);
+
+                if(isDependantFixedEntity(model, tmpEntity)){
+
+                    firstFixedEntity = tmpEntity;
+
+                    for(int j = i; j < matchedChildren.size(); j++){
+
+                        fixedList.add(matchedChildren.get(j));
+                    }
+
+                    break;
+
+                } else {
+
+                    toAdjustList.add(tmpEntity);
+                }
+            }
+
+        } else {
+
+            for(int i = (matchedChildren.size()-1); i >= 0; i--){
+
+                PositionableEntity tmpEntity =
+                    (PositionableEntity)matchedChildren.get(i);
+
+                if(isDependantFixedEntity(model, tmpEntity)){
+
+                    firstFixedEntity = tmpEntity;
+
+                    for(int j = i; j >= 0; j--){
+
+                        fixedList.add(matchedChildren.get(j));
+                    }
+
+                    break;
+
+                } else {
+
+                    toAdjustList.add(tmpEntity);
+                }
+            }
+        }
+
+        //---------------------------------------------------------------------
+        // Block any scaling that will reduce the bounds of the parent to less
+        // than the outside bounds of the first fixed entity and the inside
+        // bounds of the moving entity (plus the min span).
+        //
+        // Works only if we account for the offset of the fixed entities, which
+        // we do, and the end offsets for the parent span entity.
+        //
+        // Make sure that the distance between the first fixed entity and
+        // the last is not greater than the dimensions of the parent.
+        //
+        // Also determine the fixed entity position correction to apply.
+        //---------------------------------------------------------------------
+
+        // Calculate the maximum distance along all axis for the fixed
+        // entity set to determine minimum scale possible
+        double[] maxFixedSetDistance = new double[3];
+
+        if(firstFixedEntity != null) {
+
+            float[] firstFixedEntityBounds = new float[6];
+            double[] firstFixedEntityPos = new double[3];
+            boolean scaleCorrectionRequired = false;
+
+            ((PositionableEntity)firstFixedEntity).getStartingPosition(
+                    firstFixedEntityPos);
+
+            ((PositionableEntity)firstFixedEntity).getBounds(
+                    firstFixedEntityBounds);
+
+            if (fixedList.size() > 1) {
+
+                double[] lastFixedEntityPos = new double[3];
+                ((PositionableEntity)fixedList.get(
+                        fixedList.size()-1)).getStartingPosition(
+                                lastFixedEntityPos);
+
+
+                maxFixedSetDistance[0] =
+                    firstFixedEntityPos[0] - lastFixedEntityPos[0];
+                maxFixedSetDistance[1] =
+                    firstFixedEntityPos[1] - lastFixedEntityPos[1];
+                maxFixedSetDistance[2] =
+                    firstFixedEntityPos[2] - lastFixedEntityPos[2];
+
+                // We only want to work with positive span values
+                maxFixedSetDistance[0] = Math.abs(maxFixedSetDistance[0]);
+                maxFixedSetDistance[1] = Math.abs(maxFixedSetDistance[1]);
+                maxFixedSetDistance[2] = Math.abs(maxFixedSetDistance[2]);
+
+                // Get the last fixed entity of the set's bounds
+                float[] lastFixedEntityBounds = new float[6];
+
+                ((PositionableEntity)fixedList.get(fixedList.size() - 1)).
+                    getBounds(lastFixedEntityBounds);
+
+                // Handle positive end scaling first.
+                // Else case is negative end scaling
+                if((isPositiveDirection && isIncreasingScale) ||
+                        (!isPositiveDirection && !isIncreasingScale)) {
+
+                    maxFixedSetDistance[0] =
+                        maxFixedSetDistance[0] + firstFixedEntityBounds[1] -
+                        lastFixedEntityBounds[0];
+
+                    maxFixedSetDistance[1] =
+                        maxFixedSetDistance[1] + firstFixedEntityBounds[3] -
+                        lastFixedEntityBounds[2];
+
+                    maxFixedSetDistance[2] =
+                        maxFixedSetDistance[2] + firstFixedEntityBounds[5] -
+                        lastFixedEntityBounds[4];
+
+                } else {
+
+                    maxFixedSetDistance[0] =
+                        maxFixedSetDistance[0] - firstFixedEntityBounds[0] +
+                        lastFixedEntityBounds[1];
+
+                    maxFixedSetDistance[1] =
+                        maxFixedSetDistance[1] - firstFixedEntityBounds[2] +
+                        lastFixedEntityBounds[3];
+
+                    maxFixedSetDistance[2] =
+                        maxFixedSetDistance[2] - firstFixedEntityBounds[4] +
+                        lastFixedEntityBounds[5];
+                }
+
+            } else {
+
+                // Handle special case where there is only one fixed entity
+                maxFixedSetDistance[0] =
+                    firstFixedEntityBounds[1] - firstFixedEntityBounds[0];
+
+                maxFixedSetDistance[1] =
+                    firstFixedEntityBounds[3] - firstFixedEntityBounds[2];
+
+                maxFixedSetDistance[2] =
+                    firstFixedEntityBounds[5] - firstFixedEntityBounds[4];
+            }
+
+            // Do not allow scaling smaller than fixed entity
+            // span including bounds
+            switch(axis) {
+
+                case XAXIS:
+
+                    double newWidthSizeResult = parentNewScale[0] * parentSize[0];
+
+                    if (newWidthSizeResult < maxFixedSetDistance[0]) {
+
+                        scaleCorrectionRequired = true;
+
+                        // Handle positive end case first
+                        // else case is negative end
+                        if((isPositiveDirection && isIncreasingScale) ||
+                                (!isPositiveDirection && !isIncreasingScale)) {
+
+                            double correction =
+                                maxFixedSetDistance[0] - newWidthSizeResult;
+
+                            parentNewPos[0] = parentNewPos[0] + correction/2.0;
+
+                        } else {
+
+                            double correction =
+                                maxFixedSetDistance[0] - newWidthSizeResult;
+
+                            parentNewPos[0] = parentNewPos[0] - correction/2.0;
+
+                        }
+
+                        parentNewScale[0] =
+                            (float) (maxFixedSetDistance[0] / parentSize[0]);
+
+                    }
+
+                    break;
+
+                case YAXIS:
+
+                    double newHeightSizeResult = parentNewScale[1] * parentSize[1];
+
+                    if (newHeightSizeResult < maxFixedSetDistance[1]) {
+
+                        scaleCorrectionRequired = true;
+
+                        // Handle positive end case first
+                        // else case is negative end
+                        if((isPositiveDirection && isIncreasingScale) ||
+                                (!isPositiveDirection && !isIncreasingScale)) {
+
+                            double correction =
+                                maxFixedSetDistance[1] - newHeightSizeResult;
+
+                            parentNewPos[1] = parentNewPos[1] + correction/2.0;
+
+                        } else {
+
+                            double correction =
+                                maxFixedSetDistance[1] - newHeightSizeResult;
+
+                            parentNewPos[1] = parentNewPos[1] - correction/2.0;
+
+                        }
+
+                        parentNewScale[1] =
+                            (float) (maxFixedSetDistance[1] / parentSize[1]);
+
+                    }
+
+                    break;
+
+                case ZAXIS:
+
+                    double newDepthSizeResult = parentNewScale[2] * parentSize[2];
+
+                    if (newDepthSizeResult < maxFixedSetDistance[2]) {
+
+                        scaleCorrectionRequired = true;
+
+                        // Handle positive end case first
+                        // else case is negative end
+                        if((isPositiveDirection && isIncreasingScale) ||
+                                (!isPositiveDirection && !isIncreasingScale)) {
+
+                            double correction =
+                                maxFixedSetDistance[2] - newDepthSizeResult;
+
+                            parentNewPos[2] = parentNewPos[2] + correction/2.0;
+
+                        } else {
+
+                            double correction =
+                                maxFixedSetDistance[2] - newDepthSizeResult;
+
+                            parentNewPos[2] = parentNewPos[2] - correction/2.0;
+
+                        }
+
+                        parentNewScale[2] =
+                            (float) (maxFixedSetDistance[2] / parentSize[2]);
+
+                    }
+
+                    break;
+            }
+
+            // Perform scale correction if required
+            if (scaleCorrectionRequired) {
+
+                switch (axis) {
+                    case XAXIS:
+                        fixedEntityCorrection[0] =
+                            parentStartPos[0] - parentNewPos[0];
+                        break;
+
+                    case YAXIS:
+                        fixedEntityCorrection[1] =
+                            parentStartPos[1] - parentNewPos[1];
+                        break;
+
+                    case ZAXIS:
+                        fixedEntityCorrection[2] =
+                            parentStartPos[2] - parentNewPos[2];
+                        break;
+                }
+
+                if(command instanceof ScaleEntityCommand) {
+
+                    ScaleEntityCommand scaleCmd = (ScaleEntityCommand) command;
+                    scaleCmd.setNewPosition(parentNewPos);
+                    scaleCmd.setNewScale(parentNewScale);
+
+                } else if(command instanceof ScaleEntityTransientCommand) {
+
+                    ScaleEntityTransientCommand scaleTransientCmd =
+                        (ScaleEntityTransientCommand) command;
+
+                    scaleTransientCmd.setPosition(parentNewPos);
+                    scaleTransientCmd.setScale(parentNewScale);
+                }
+
+            }
+
+        } else {
+
+            fixedEntityCorrection[0] = 0.0;
+            fixedEntityCorrection[1] = 0.0;
+            fixedEntityCorrection[2] = 0.0;
+
+        }
+
+        //----------------------------------------------------------------------
+        // Calculate the span distance. If the span distance, or change in scale
+        // would cause the span to be less than the length of the fixed set of
+        // entities then we need to clamp the scale and correct all of the
+        // adjustments to be made.
+        //
+        // Calculate span distance, accounting for offset applied to fixed list
+        // products (if fixed products exist)
+        //----------------------------------------------------------------------
+        double spanDistance = 0.0;
+        double fullSize = 0.0;
+
+        switch(axis) {
+            case XAXIS:
+
+                fullSize = parentSize[0] * parentNewScale[0];
+
+                if(firstFixedEntity != null) {
+
+                    spanDistance =
+                        fullSize - maxFixedSetDistance[0] - negativeOffset - positiveOffset;
+
+                } else {
+
+                    spanDistance = fullSize - positiveOffset - negativeOffset;
+
+                }
+
+                break;
+
+            case YAXIS:
+
+                fullSize = parentSize[1] * parentNewScale[1];
+
+                if(firstFixedEntity != null) {
+
+                    spanDistance =
+                        fullSize - maxFixedSetDistance[1] - negativeOffset - positiveOffset;
+
+                } else {
+
+                    spanDistance = fullSize - positiveOffset - negativeOffset;
+
+                }
+
+                break;
+
+            case ZAXIS:
+
+                fullSize = parentSize[2] * parentNewScale[2];
+
+                if(firstFixedEntity != null) {
+
+                    spanDistance =
+                        fullSize - maxFixedSetDistance[2] - negativeOffset - positiveOffset;
+
+                } else {
+
+                    spanDistance = fullSize - positiveOffset - negativeOffset;
+
+                }
+
+                break;
+        }
+
+        // Calculate number of entities to add along span
+        int quantityToAdd = (int) (spanDistance / stepSize) + 1;
+
+        // If there is a remainder, add an extra entity
+        double remainder = (spanDistance % stepSize);
+
+        if(remainder > 0.0) {
+            quantityToAdd++;
+        }
+
+        // get the step size between positions
+        double posStep = spanDistance/(quantityToAdd - 1);
+
+        // If we have a fixed entity, we don't adjust it, so reduce the
+        // quantity by one.
+        if(firstFixedEntity != null){
+
+            quantityToAdd--;
+        }
+        System.out.println("spanDistance: "+spanDistance);
+        System.out.println("quantity to add: "+quantityToAdd);
+
+        // Special case check. If the bounds of the fixed entity + min space is
+        // greater than the span, quantity to add is 0.
+        if (firstFixedEntity != null) {
+
+            double requiredSpace = 0.0;
+            float[] bounds = new float[6];
+            firstFixedEntity.getBounds(bounds);
+
+            float[] toolScale = simpleTool.getScale();
+            float[] toolSize = simpleTool.getSize();
+
+            boolean spanIsTooSmall = false;
+
+            switch (axis) {
+
+            case XAXIS:
+
+                // Handle positive scale edge first
+                if ((isPositiveDirection && isIncreasingScale) ||
+                        (!isPositiveDirection && !isIncreasingScale)) {
+
+                    requiredSpace =
+                        bounds[1] + (toolScale[0] * toolSize[0]) + MIN_SPACE;
+
+                } else {
+
+                    requiredSpace =
+                        Math.abs(bounds[0]) + (toolScale[0] * toolSize[0]) + MIN_SPACE;
+                }
+
+
+                System.out.println("requiredSpace: "+requiredSpace);
+                if (requiredSpace > spanDistance) {
+                    spanIsTooSmall = true;
+                    quantityToAdd = 0;
+                }
+                break;
+
+            case YAXIS:
+
+                // Handle positive scale edge first
+                if ((isPositiveDirection && isIncreasingScale) ||
+                        (!isPositiveDirection && !isIncreasingScale)) {
+
+                    requiredSpace =
+                        bounds[3] + (toolScale[1] * toolSize[1]) + MIN_SPACE;
+
+                } else {
+
+                    requiredSpace =
+                        Math.abs(bounds[2]) + (toolScale[1] * toolSize[1]) + MIN_SPACE;
+                }
+
+                System.out.println("requiredSpace: "+requiredSpace);
+                if (requiredSpace > spanDistance) {
+                    spanIsTooSmall = true;
+                    quantityToAdd = 0;
+                }
+                break;
+
+            case ZAXIS:
+
+                // Handle positive scale edge first
+                if ((isPositiveDirection && isIncreasingScale) ||
+                        (!isPositiveDirection && !isIncreasingScale)) {
+
+                    requiredSpace =
+                        bounds[5] + (toolScale[2] * toolSize[2]) + MIN_SPACE;
+
+                } else {
+
+                    requiredSpace =
+                        Math.abs(bounds[4]) + (toolScale[2] * toolSize[2]) + MIN_SPACE;
+                }
+
+                System.out.println("requiredSpace: "+requiredSpace);
+                if (requiredSpace > spanDistance) {
+                    spanIsTooSmall = true;
+                    quantityToAdd = 0;
+                }
+                break;
+            }
+
+            if (spanIsTooSmall) {
+                System.out.println("span is too small!!!!");
+                switch (axis) {
+
+                case XAXIS:
+
+                    // Handle positive scale edge first
+                    if ((isPositiveDirection && isIncreasingScale) ||
+                            (!isPositiveDirection && !isIncreasingScale)) {
+
+                        parentNewScale[0] = (float)
+                            (maxFixedSetDistance[0] +
+                                    negativeOffset +
+                                    positiveOffset)/parentSize[0];
+
+                        double positionCorrection =
+                            (parentStartScale[0] * parentSize[0]) -
+                            (parentNewScale[0] * parentSize[0]);
+
+                        parentNewPos[0] =
+                            parentStartPos[0] - positionCorrection/2.0;
+
+
+                    } else {
+
+                        parentNewScale[0] = (float)
+                        (maxFixedSetDistance[0] +
+                                negativeOffset +
+                                positiveOffset)/parentSize[0];
+
+                        double positionCorrection =
+                            (parentStartScale[0] * parentSize[0]) -
+                            (parentNewScale[0] * parentSize[0]);
+
+                        parentNewPos[0] =
+                            parentStartPos[0] + positionCorrection/2.0;
+
+                    }
+                    break;
+
+                case YAXIS:
+
+                    // Handle positive scale edge first
+                    if ((isPositiveDirection && isIncreasingScale) ||
+                            (!isPositiveDirection && !isIncreasingScale)) {
+
+                        parentNewScale[1] = (float)
+                            (maxFixedSetDistance[1] +
+                                    negativeOffset +
+                                    positiveOffset)/parentSize[1];
+
+                        double positionCorrection =
+                            (parentStartScale[1] * parentSize[1]) -
+                            (parentNewScale[1] * parentSize[1]);
+
+                        parentNewPos[1] =
+                            parentStartPos[1] - positionCorrection/2.0;
+
+
+                    } else {
+
+                        parentNewScale[1] = (float)
+                        (maxFixedSetDistance[1] +
+                                negativeOffset +
+                                positiveOffset)/parentSize[1];
+
+                        double positionCorrection =
+                            (parentStartScale[1] * parentSize[1]) -
+                            (parentNewScale[1] * parentSize[1]);
+
+                        parentNewPos[1] =
+                            parentStartPos[1] + positionCorrection/2.0;
+
+                    }
+                    break;
+
+                case ZAXIS:
+
+                    // Handle positive scale edge first
+                    if ((isPositiveDirection && isIncreasingScale) ||
+                            (!isPositiveDirection && !isIncreasingScale)) {
+
+                        parentNewScale[2] = (float)
+                            (maxFixedSetDistance[2] +
+                                    negativeOffset +
+                                    positiveOffset)/parentSize[2];
+
+                        double positionCorrection =
+                            (parentStartScale[2] * parentSize[2]) -
+                            (parentNewScale[2] * parentSize[2]);
+
+                        parentNewPos[2] =
+                            parentStartPos[2] - positionCorrection/2.0;
+
+
+                    } else {
+
+                        parentNewScale[2] = (float)
+                        (maxFixedSetDistance[2] +
+                                negativeOffset +
+                                positiveOffset)/parentSize[2];
+
+                        double positionCorrection =
+                            (parentStartScale[2] * parentSize[2]) -
+                            (parentNewScale[2] * parentSize[2]);
+
+                        parentNewPos[2] =
+                            parentStartPos[2] + positionCorrection/2.0;
+
+                    }
+                    break;
+                }
+
+                // Correct the fixed entity correction values
+                switch (axis) {
+                    case XAXIS:
+                        fixedEntityCorrection[0] =
+                            parentStartPos[0] - parentNewPos[0];
+                        break;
+
+                    case YAXIS:
+                        fixedEntityCorrection[1] =
+                            parentStartPos[1] - parentNewPos[1];
+                        break;
+
+                    case ZAXIS:
+                        fixedEntityCorrection[2] =
+                            parentStartPos[2] - parentNewPos[2];
+                        break;
+                }
+
+                // Update the commands
+                if(command instanceof ScaleEntityCommand) {
+
+                    ScaleEntityCommand scaleCmd = (ScaleEntityCommand) command;
+                    scaleCmd.setNewPosition(parentNewPos);
+                    scaleCmd.setNewScale(parentNewScale);
+
+                } else if(command instanceof ScaleEntityTransientCommand) {
+
+                    ScaleEntityTransientCommand scaleTransientCmd =
+                        (ScaleEntityTransientCommand) command;
+
+                    scaleTransientCmd.setPosition(parentNewPos);
+                    scaleTransientCmd.setScale(parentNewScale);
+                }
+
+
+            }
+        }
+
+        //---------------------------------------------------------------------
+        // Need to move fixed entity and all others after it back amount of
+        // fixedEntityCorrection. This includes all children that are not
+        // not auto added.
+        //---------------------------------------------------------------------
+        for(int i = 0; i < fixedList.size(); i++){
+
+            Entity tmpEntity = fixedList.get(i);
+            double[] tmpPos = new double[3];
+
+            if (tmpEntity instanceof PositionableEntity) {
+
+                ((PositionableEntity)tmpEntity).getStartingPosition(tmpPos);
+
+            } else {
+                continue;
+            }
+
+            tmpPos[0] = tmpPos[0] + fixedEntityCorrection[0];
+            tmpPos[1] = tmpPos[1] + fixedEntityCorrection[1];
+            tmpPos[2] = tmpPos[2] + fixedEntityCorrection[2];
+
+            Command mvCmd =
+                issueMoveCommand(
+                        model,
+                        tmpEntity,
+                        tmpPos,
+                        command.isTransient(),
+                        false,
+                        axis);
+
+            if(mvCmd == null){
+                errorReporter.debugReport(
+                        "move command of fixed entity returned null",
+                        null);
+            }
+            multiCmdList.add(mvCmd);
+
+        }
+
+        // Now do all the other children that are not auto adds
+       multiCmdList.addAll(
+               moveAllNonAutoAddChildren(
+                       model,
+                       parentEntity,
+                       fixedEntityCorrection,
+                       command.isTransient()));
+
+        //---------------------------------------------------------------------
+        // Calculate the starting relative position for auto place.
+        // Keep in mind auto place algorithm here goes linearly negative to
+        // positive along the specified axis.
+        // If we have fixed entities, and we are scaling on the positive edge
+        // then we need to bump over the step amount so we don't add over the
+        // fixed entity. If we have fixed entites, and we are scaling on the
+        // negative edge then we need to do calculation to determine negative
+        // edge to start from.
+        //---------------------------------------------------------------------
+        double startingRelativePosition = 0.0;
+
+        if (firstFixedEntity != null) {
+
+            if ((isPositiveDirection && isIncreasingScale) ||
+                    (!isPositiveDirection && !isIncreasingScale)) {
+
+                double[] tmpPos = new double[3];
+
+                ((PositionableEntity)firstFixedEntity).getStartingPosition(
+                        tmpPos);
+
+                switch(axis){
+                    case XAXIS:
+                        startingRelativePosition =
+                            tmpPos[0] + fixedEntityCorrection[0] + posStep;
+                        break;
+                    case YAXIS:
+                        startingRelativePosition =
+                            tmpPos[1] + fixedEntityCorrection[1] + posStep;
+                        break;
+                    case ZAXIS:
+                        startingRelativePosition =
+                            tmpPos[2] + fixedEntityCorrection[2] + posStep;
+                        break;
+                }
+
+            } else {
+
+                double[] tmpPos = new double[3];
+
+                ((PositionableEntity)firstFixedEntity).getStartingPosition(
+                        tmpPos);
+
+                switch(axis){
+                    case XAXIS:
+                        startingRelativePosition =
+                            tmpPos[0] + fixedEntityCorrection[0] -spanDistance;
+                        break;
+                    case YAXIS:
+                        startingRelativePosition =
+                            tmpPos[1] + fixedEntityCorrection[1] - spanDistance;
+                        break;
+                    case ZAXIS:
+                        startingRelativePosition =
+                            tmpPos[2] + fixedEntityCorrection[2] - spanDistance;
+                        break;
+                }
+            }
+
+        } else {
+
+            switch (axis) {
+
+                case XAXIS:
+                    startingRelativePosition = -(spanDistance/2.0);
+                    break;
+
+                case YAXIS:
+                    startingRelativePosition = -(spanDistance/2.0);
+                    break;
+
+                case ZAXIS:
+                    startingRelativePosition = -(spanDistance/2.0);
+                    break;
+            }
+        }
+
+
+        // Adjust and add auto place product going from negative
+        // to positive.
+        for(int i = 0; i < quantityToAdd; i++){
+
+            double[] childPos = new double[3];
+
+            childPos[0] = 0.0;
+            childPos[1] = 0.0;
+            childPos[2] = 0.0;
+
+            double offset = posStep * i;
+
+            switch (axis) {
+
+                case XAXIS:
+                    childPos[0] = startingRelativePosition + offset;
+                    break;
+
+                case YAXIS:
+                    childPos[1] = startingRelativePosition + offset;
+                    break;
+
+                case ZAXIS:
+                    childPos[2] = startingRelativePosition + offset;
+                    break;
+            }
+
+            if(toAdjustList.size() > i) {
+
+                double[] tmpPos = new double[3];
+
+                PositionableEntity tmpEntity =
+                    (PositionableEntity) toAdjustList.get(i);
+
+                tmpEntity.getPosition(tmpPos);
+
+                switch (axis) {
+
+                    case XAXIS:
+                        tmpPos[0] = childPos[0];
+                        break;
+
+                    case YAXIS:
+                        tmpPos[1] = childPos[1];
+                        break;
+
+                    case ZAXIS:
+                        tmpPos[2] = childPos[2];
+                        break;
+                }
+
+                Command cmd = null;
+
+                if (tmpEntity.getToolID().equals(toolID)) {
+
+                    cmd = issueMoveCommand(
+                            model,
+                            tmpEntity,
+                            tmpPos,
+                            command.isTransient(),
+                            forceFit,
+                            axis);
+
+                    // Perform special switch model calculations if cmd is null
+                    // indicating illegal collision conditions exist.
+                    // Attempt to add the alternates and remove the existing
+                    // entity.
+                    if (cmd == null &&
+                            skuX3DChange &&
+                            skuX3DProd != null) {
+
+                        // See if the product id matches any of the swap
+                        // alternates
+                        for (int w = 0; w < skuX3DProd.length; w++) {
+
+                            if (skuX3DProd[w].equalsIgnoreCase(
+                                    tmpEntity.getToolID())) {
+
+                                // Remove the current one
+                                Command rmvCmd =
+                                    issueDeleteCommand(
+                                            model,
+                                            parentEntity,
+                                            tmpEntity);
+
+                                multiCmdList.add(rmvCmd);
+
+                                // Attempt to add the alternate
+                                int parentEntityParentID =
+                                    parentEntity.getParentEntityID();
+
+                                Entity parentEntityParentEntity =
+                                    model.getEntity(parentEntityParentID);
+
+                                cmd = issueNewAddChildCommand(
+                                        model,
+                                        parentEntity,
+                                        parentEntityParentEntity,
+                                        simpleTool,
+                                        childPos,
+                                        new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                                        false,
+                                        forceFit,
+                                        axis,
+                                        ORIENTATION.DEFAULT);
+
+                                multiCmdList.add(cmd);
+
+                                break;
+                            }
+                        }
+                    } else {
+
+                        multiCmdList.add(cmd);
+                    }
+
+                } else {
+
+                    // Handle the case where the toolID's don't match
+                    // indicating that a swap model exits in place of
+                    // the default.
+                    if (cmd == null &&
+                            skuX3DChange &&
+                            skuX3DProd != null) {
+
+                        // See if the product id matches any of the swap
+                        // alternates
+                        for (int w = 0; w < skuX3DProd.length; w++) {
+
+                            if (skuX3DProd[w].equalsIgnoreCase(
+                                    tmpEntity.getToolID())) {
+
+                                // Remove the current one
+                                Command rmvCmd =
+                                    issueDeleteCommand(
+                                            model,
+                                            parentEntity,
+                                            tmpEntity);
+
+                                multiCmdList.add(rmvCmd);
+
+                                // Attempt to add the original
+                                int parentEntityParentID =
+                                    parentEntity.getParentEntityID();
+
+                                Entity parentEntityParentEntity =
+                                    model.getEntity(parentEntityParentID);
+
+                                cmd = issueNewAddChildCommand(
+                                        model,
+                                        parentEntity,
+                                        parentEntityParentEntity,
+                                        simpleTool,
+                                        childPos,
+                                        new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                                        false,
+                                        forceFit,
+                                        axis,
+                                        ORIENTATION.DEFAULT);
+
+                                multiCmdList.add(cmd);
+
+                                break;
+                            }
+                        }
+                    } else {
+
+                        multiCmdList.add(cmd);
+                    }
+                }
+
+            } else {
+
+                int parentEntityParentID =
+                    parentEntity.getParentEntityID();
+
+                Entity parentEntityParentEntity =
+                    model.getEntity(parentEntityParentID);
+
+                AddEntityChildCommand addCmd =
+                    issueNewAddChildCommand(
+                            model,
+                            parentEntity,
+                            parentEntityParentEntity,
+                            simpleTool,
+                            childPos,
+                            new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                            false,
+                            forceFit,
+                            axis,
+                            ORIENTATION.DEFAULT);
+
+                multiCmdList.add(addCmd);
+            }
+        }
+
+
+        // Remove any left overs
+        if(toAdjustList.size() > quantityToAdd){
+
+            for(int i = quantityToAdd; i < toAdjustList.size(); i++){
+
+                Command cmd =
+                    issueDeleteCommand(
+                            model,
+                            parentEntity,
+                            toAdjustList.get(i));
+
+                multiCmdList.add(cmd);
+            }
+        }
+
+        return multiCmdList;
+    }
+
+
+    /**
+     * Updates auto add end products relative to the scale change.
+     *
+     * @param parentEntity Entity affected by command
+     * @param model WorldModel to reference
+     * @param command Command affecting the entity
+     * @return
+     */
+    private ArrayList<Command> updateAutoAddEndProduct(
+            Entity parentEntity,
+            WorldModel model,
+            Command command) {
+
+        // NOTE: THE KEY TO THIS WORKING IS THE ORDERING
+        // REQUIREMENT THAT ALL AUTO PLACE DATA SETS
+        // MATCH THE ORDER OF THE CX.autoPlObj DATA SET.
+        //
+        // To emphasize the point, CX.autoAddAxis, CX.autoAddNegOffset,
+        // CX.autoAddPosOffset and CX.autoAddStepSize are matched by
+        // index to the CX.autoPlObj listing.
+
+        String[] autoPlaceObjectsProp = (String[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_PLACE_OBJECTS_PROP);
+
+        int[] autoAddEndProduct = (int[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_END_PLACEMENTS);
+
+        Enum[] autoAddAxis = (Enum[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_AXIS);
+
+        float[] autoAddNegOffset = (float[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_NEG_OFFSET);
+
+        float[] autoAddPosOffset = (float[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_POS_OFFSET);
+
+        //
+        // defensive coding: check if we should break early
+        // in case the required properties are not set
+        //
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        if( autoPlaceObjectsProp == null ||
+                autoAddEndProduct == null ||
+                autoAddAxis == null ||
+                autoAddNegOffset == null ||
+                autoAddPosOffset == null) {
+
+            return multiCmdList;
+        }
+
+        //
+        // Generate a command for each auto placement and add to multiCmdList
+        //
+        for(int i = 0; i < autoPlaceObjectsProp.length; i++){
+
+            // Only perform task when autoAddEndProduct is not equal to zero.
+            if (autoAddEndProduct[i] == 0) {
+                continue;
+            }
+
+            SimpleTool simpleTool =
+                getSimpleToolByName(autoPlaceObjectsProp[i]);
+
+            ArrayList<Command> addCommands =
+                updateEndProducts(
+                        (ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS)autoAddAxis[i],
+                        simpleTool,
+                        model,
+                        command,
+                        autoAddPosOffset[i],
+                        autoAddNegOffset[i]);
+
+            multiCmdList.addAll(addCommands);
+        }
+
+        return multiCmdList;
+    }
+
+
+    /**
+     * Update the auto add end products based on change of scale.
+     *
+     * @param axis Axis of adjustment for auto add end products
+     * @param simpleTool Tool to create new entities with
+     * @param model WorldModel to reference
+     * @param command Command being evaluated by rule
+     * @param positiveOffset Positive offset value for placement
+     * @param negativeOffset Negative offset value for placement
+     * @return ArrayList of commands
+     */
+    private ArrayList<Command> updateEndProducts(
+            TARGET_ADJUSTMENT_AXIS axis,
+            SimpleTool simpleTool,
+            WorldModel model,
+            Command command,
+            double positiveOffset,
+            double negativeOffset) {
+
+        ArrayList<Command> commandList = new ArrayList<Command>();
+        PositionableEntity parentEntity = null;
+        float[] parentBounds = new float[6];
+
+        // Extract the parent entity that we need to do our analysis on and in
+        // turn calculate the new positions for the end product for.
+        if (command instanceof ScaleEntityCommand) {
+
+            ScaleEntityCommand scaleCmd = (ScaleEntityCommand) command;
+
+            if (!(scaleCmd.getEntity() instanceof PositionableEntity)) {
+                return commandList;
+            } else {
+                parentEntity = (PositionableEntity) scaleCmd.getEntity();
+            }
+
+        } else if (command instanceof ScaleEntityTransientCommand) {
+
+            ScaleEntityTransientCommand scaleTranCmd =
+                (ScaleEntityTransientCommand) command;
+
+            if (!(scaleTranCmd.getEntity() instanceof PositionableEntity)) {
+                return commandList;
+            } else {
+                parentEntity = (PositionableEntity) scaleTranCmd.getEntity();
+            }
+
+        } else {
+            return commandList;
+        }
+
+        // Calculate the two positions to attemp based on the parent bounds
+        parentEntity.getBounds(parentBounds);
+
+        double[] posPosition = new double[3];
+        double[] negPosition = new double[3];
+
+        switch (axis) {
+
+            case XAXIS:
+                posPosition[0] = parentBounds[1] - positiveOffset;
+                negPosition[0] = parentBounds[0] + negativeOffset;
+                break;
+
+            case YAXIS:
+                posPosition[1] = parentBounds[3] - positiveOffset;
+                negPosition[1] = parentBounds[2] + negativeOffset;
+                break;
+
+            case ZAXIS:
+                posPosition[2] = parentBounds[5] - positiveOffset;
+                negPosition[2] = parentBounds[4] + negativeOffset;
+                break;
+        }
+
+        // See if the entity already exists as a child of the parent
+        ArrayList<Entity> children = parentEntity.getChildren();
+        ArrayList<Entity> matchedChildList = new ArrayList<Entity>();
+
+        String toolID = simpleTool.getToolID();
+
+        if (children != null) {
+            for(int i = 0; i < children.size(); i++){
+
+                if (children.get(i).getToolID().equalsIgnoreCase(toolID)) {
+                    matchedChildList.add(children.get(i));
+                }
+            }
+        }
+
+        // Attempt to associate the matched entities with either the positive
+        // or negative entity case.
+        Entity positiveEntity = null;
+        Entity negativeEntity = null;
+
+        for (int i = 0; i < matchedChildList.size(); i++) {
+
+            Entity tmpEntity = matchedChildList.get(i);
+
+            ORIENTATION orientation =
+                (ORIENTATION) tmpEntity.getProperty(
+                        Entity.DEFAULT_ENTITY_PROPERTIES,
+                        AutoAddRule.AUTO_ADD_END_ORIENTATION);
+
+            if (orientation != null) {
+
+                switch (orientation) {
+
+                    case POSITIVE:
+                        positiveEntity = tmpEntity;
+                        break;
+                    case NEGATIVE:
+                        negativeEntity = tmpEntity;
+                        break;
+                }
+            }
+        }
+
+        // Try the positive position first
+        Command positiveCommand = null;
+
+        if (positiveEntity != null) {
+
+            positiveCommand =
+                issueMoveCommand(
+                        model,
+                        positiveEntity,
+                        posPosition,
+                        command.isTransient(),
+                        false,
+                        axis);
+
+            if (positiveCommand == null) {
+
+                positiveCommand =
+                    issueDeleteCommand(
+                            model,
+                            parentEntity,
+                            positiveEntity);
+            }
+
+        } else {
+
+            int parentEntityParentID = parentEntity.getParentEntityID();
+
+            Entity parentEntityParentEntity =
+                model.getEntity(parentEntityParentID);
+
+            positiveCommand =
+                issueNewAddChildCommand(
+                        model,
+                        parentEntity,
+                        parentEntityParentEntity,
+                        simpleTool,
+                        posPosition,
+                        new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                        false,
+                        false,
+                        axis,
+                        ORIENTATION.POSITIVE);
+
+        }
+
+        if (positiveCommand != null) {
+            commandList.add(positiveCommand);
+        }
+
+        // Try the negative position second
+        Command negativeCommand = null;
+
+        if (negativeEntity != null) {
+
+            negativeCommand =
+                issueMoveCommand(
+                        model,
+                        negativeEntity,
+                        negPosition,
+                        command.isTransient(),
+                        false,
+                        axis);
+
+            if (negativeCommand == null) {
+
+                negativeCommand =
+                    issueDeleteCommand(
+                            model,
+                            parentEntity,
+                            negativeEntity);
+            }
+
+        } else if (positiveCommand == null) {
+
+            int parentEntityParentID = parentEntity.getParentEntityID();
+
+            Entity parentEntityParentEntity =
+                model.getEntity(parentEntityParentID);
+
+            negativeCommand =
+                issueNewAddChildCommand(
+                        model,
+                        parentEntity,
+                        parentEntityParentEntity,
+                        simpleTool,
+                        negPosition,
+                        new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                        false,
+                        false,
+                        axis,
+                        ORIENTATION.NEGATIVE);
+        }
+
+        if (negativeCommand != null) {
+            commandList.add(negativeCommand);
+        }
+
+        return commandList;
+    }
+
+    /**
+     * Check the scale change for reduction in size past the minimum allowed
+     * amount if no minimum scale yet hit. The minimum allowed scale amount
+     * for auto adding parents is the negative and positive offset plus the
+     * bounds of the two outside entities along the respective span axis plus
+     * a class defined buffer MIN_SPACE for separation between the end
+     * products.
+     *
+     * @param command Command to examine
+     * @param axis Axis to operate on
+     * @param sortedChildren Sorted list of children in descending order
+     * @param isPositiveDirection Is positive scale direction flag
+     * @param isIncreasingScale Is increasing scale direction flag
+     */
+    private void performMinimumAutoAddParentScaleCheck(
+            Command command,
+            ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS axis,
+            ArrayList<Entity> sortedChildren,
+            boolean isPositiveDirection,
+            boolean isIncreasingScale) {
+
+        // We will label these variables as parent values since the command
+        // is acting on the parent entity of the auto add children and we
+        // will need to be able to identify the differences.
+        PositionableEntity parentEntity = null;
+        double[] parentNewPos = new double[3];
+        float[] parentNewScale = new float[3];
+        float[] parentSize = new float[3];
+
+        double totalIndent = 0.0;
+        float[] outsideChildOneBounds = new float[6];
+        float[] outsideChildTwoBounds = new float[6];
+
+        if (command instanceof ScaleEntityCommand) {
+
+            ((ScaleEntityCommand)command).getNewScale(parentNewScale);
+            ((ScaleEntityCommand)command).getNewPosition(parentNewPos);
+            parentEntity = (PositionableEntity)
+                ((ScaleEntityCommand)command).getEntity();
+
+        } else if (command instanceof ScaleEntityTransientCommand) {
+
+            ((ScaleEntityTransientCommand)command).getScale(parentNewScale);
+            ((ScaleEntityTransientCommand)command).getPosition(parentNewPos);
+            parentEntity = (PositionableEntity)
+                ((ScaleEntityTransientCommand)command).getEntity();
+
+        } else {
+            return;
+        }
+
+        if (parentEntity != null) {
+            parentEntity.getSize(parentSize);
+        } else {
+            return;
+        }
+
+        // Get the information about the two outside children
+        if (sortedChildren.size() < 2) {
+            return;
+        }
+
+        PositionableEntity outsideChildOne =
+            (PositionableEntity) sortedChildren.get(0);
+        PositionableEntity outsideChildTwo =
+            (PositionableEntity) sortedChildren.get(sortedChildren.size() -1);
+
+        outsideChildOne.getBounds(outsideChildOneBounds);
+        outsideChildTwo.getBounds(outsideChildTwoBounds);
+
+        // Get the negative and positive offset for these entities
+        // We are assuming that the two outside entities are the same
+        String[] autoAddProductIDS = (String[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_PLACE_OBJECTS_PROP);
+
+        float[] autoAddNegativeOffsets = (float[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_NEG_OFFSET);
+
+        float[] autoAddPositiveOffsets = (float[])
+        RulePropertyAccessor.getRulePropertyValue(
+                parentEntity,
+                ChefX3DRuleProperties.AUTO_ADD_POS_OFFSET);
+
+        if (autoAddProductIDS == null) {
+            return;
+        }
+
+        for (int i = 0; i < autoAddProductIDS.length; i++) {
+
+            if (autoAddProductIDS[i].equalsIgnoreCase(
+                    outsideChildOne.getToolID())) {
+
+                if (autoAddNegativeOffsets.length > i) {
+                    totalIndent += autoAddNegativeOffsets[i];
+                }
+
+                if (autoAddPositiveOffsets.length > i) {
+                    totalIndent += autoAddPositiveOffsets[i];
+                }
+
+                break;
+            }
+        }
+
+        // Do not allow scaling below the threshold of the two outside auto
+        // place products plus any indent and a small space between the
+        // two outside entities. We must always have two outside auto place
+        // products so there is no sense in letting the scale go less than the
+        // required space to allow both the outside products to exist.
+        boolean autoAddMinScaleReached = false;
+        double minSpan = 0.0;
+
+        switch(axis) {
+
+            case XAXIS:
+
+                minSpan =
+                    totalIndent +
+                    Math.abs(outsideChildOneBounds[0]) + outsideChildOneBounds[1] +
+                    Math.abs(outsideChildTwoBounds[0]) + outsideChildTwoBounds[1] +
+                    MIN_SPACE;
+
+                double newWidthSizeResult = parentNewScale[0] * parentSize[0];
+
+                if (newWidthSizeResult < minSpan) {
+
+                    autoAddMinScaleReached = true;
+
+                    // Handle positive end case first
+                    // else case is negative end
+                    if((isPositiveDirection && isIncreasingScale) ||
+                            (!isPositiveDirection && !isIncreasingScale)) {
+
+                        double correction =
+                            minSpan - newWidthSizeResult;
+
+                        parentNewPos[0] = parentNewPos[0] + correction/2.0;
+
+                    } else {
+
+                        double correction =
+                            minSpan - newWidthSizeResult;
+
+                        parentNewPos[0] = parentNewPos[0] - correction/2.0;
+
+                    }
+
+                    parentNewScale[0] =
+                        (float) (minSpan / parentSize[0]);
+
+                }
+
+                break;
+
+            case YAXIS:
+
+                minSpan =
+                    totalIndent +
+                    Math.abs(outsideChildOneBounds[2]) + outsideChildOneBounds[3] +
+                    Math.abs(outsideChildTwoBounds[2]) + outsideChildTwoBounds[3] +
+                    MIN_SPACE;
+
+                double newHeightSizeResult = parentNewScale[1] * parentSize[1];
+
+                if (newHeightSizeResult < minSpan) {
+
+                    autoAddMinScaleReached = true;
+
+                    // Handle positive end case first
+                    // else case is negative end
+                    if((isPositiveDirection && isIncreasingScale) ||
+                            (!isPositiveDirection && !isIncreasingScale)) {
+
+                        double correction =
+                            minSpan - newHeightSizeResult;
+
+                        parentNewPos[1] = parentNewPos[1] + correction/2.0;
+
+                    } else {
+
+                        double correction =
+                            minSpan - newHeightSizeResult;
+
+                        parentNewPos[1] = parentNewPos[1] - correction/2.0;
+
+                    }
+
+                    parentNewScale[1] =
+                        (float) (minSpan / parentSize[1]);
+
+                }
+
+                break;
+
+            case ZAXIS:
+
+                minSpan =
+                    totalIndent +
+                    Math.abs(outsideChildOneBounds[4]) + outsideChildOneBounds[5] +
+                    Math.abs(outsideChildTwoBounds[4]) + outsideChildTwoBounds[5] +
+                    MIN_SPACE;
+
+                double newDepthSizeResult = parentNewScale[2] * parentSize[2];
+
+                if (newDepthSizeResult < minSpan) {
+
+                    autoAddMinScaleReached = true;
+
+                    // Handle positive end case first
+                    // else case is negative end
+                    if((isPositiveDirection && isIncreasingScale) ||
+                            (!isPositiveDirection && !isIncreasingScale)) {
+
+                        double correction =
+                            minSpan - newDepthSizeResult;
+
+                        parentNewPos[2] = parentNewPos[2] + correction/2.0;
+
+                    } else {
+
+                        double correction =
+                            minSpan - newDepthSizeResult;
+
+                        parentNewPos[2] = parentNewPos[2] - correction/2.0;
+
+                    }
+
+                    parentNewScale[2] =
+                        (float) (minSpan / parentSize[2]);
+
+                }
+
+                break;
+        }
+
+        // Perform scale correction if required
+        if (autoAddMinScaleReached) {
+
+            if(command instanceof ScaleEntityCommand) {
+
+                ScaleEntityCommand scaleCmd = (ScaleEntityCommand) command;
+                scaleCmd.setNewPosition(parentNewPos);
+                scaleCmd.setNewScale(parentNewScale);
+
+            } else if(command instanceof ScaleEntityTransientCommand) {
+
+                ScaleEntityTransientCommand scaleTransientCmd =
+                    (ScaleEntityTransientCommand) command;
+
+                scaleTransientCmd.setPosition(parentNewPos);
+                scaleTransientCmd.setScale(parentNewScale);
+            }
+
+        }
+    }
+
+    /**
+     * Check any product that auto adds entities for collisions resulting from
+     * the change in scale. Do not allow any scaling that will result in
+     * illegal collisions because that will really mung things up.
+     *
+     * @param command Command to examine
+     * @param model WorldModel to reference
+     * @param isPositiveDirection Is positive direction flag
+     * @param isIncreasingScale Is increasing scale flag
+     * @param axis Axis to examine
+     */
+    private void performScaleCollisionAdjustment(
+            Command command,
+            WorldModel model,
+            TARGET_ADJUSTMENT_AXIS axis) {
+
+        Entity entity = null;
+
+        // Get the entity
+        if (command instanceof RuleDataAccessor) {
+            entity = ((RuleDataAccessor)command).getEntity();
+        }
+
+        // Safety check
+        if (entity == null) {
+            return;
+        }
+
+        // Extract needed data
+        double[] newPos = new double[3];
+        double[] oldPos = new double[3];
+        float[] newScale = new float[3];
+        float[] oldScale = new float[3];
+        float[] size = new float[3];
+        double[] parentZonePos = null;
+
+        if (command instanceof ScaleEntityCommand) {
+
+            ScaleEntityCommand scaleCmd = (ScaleEntityCommand) command;
+
+            int parentEntityID = entity.getParentEntityID();
+            Entity parentEntity = model.getEntity(parentEntityID);
+
+            parentZonePos =
+                getPositionRelativeToZone(model, parentEntity);
+
+            scaleCmd.getNewPosition(newPos);
+            scaleCmd.getOldPosition(oldPos);
+            scaleCmd.getNewScale(newScale);
+            scaleCmd.getOldScale(oldScale);
+            ((PositionableEntity) scaleCmd.getEntity()).getSize(size);
+
+            // Get the new position relative to the zone
+            newPos[0] += parentZonePos[0];
+            newPos[1] += parentZonePos[1];
+            newPos[2] += parentZonePos[2];
+
+        } else if (command instanceof ScaleEntityTransientCommand) {
+
+            ScaleEntityTransientCommand scaleCmd =
+                (ScaleEntityTransientCommand) command;
+
+            int parentEntityID = entity.getParentEntityID();
+            Entity parentEntity = model.getEntity(parentEntityID);
+
+            parentZonePos =
+                getPositionRelativeToZone(model, parentEntity);
+
+            scaleCmd.getPosition(newPos);
+            scaleCmd.getScale(newScale);
+            ((PositionableEntity) scaleCmd.getEntity()).getSize(size);
+            ((PositionableEntity) scaleCmd.getEntity()).getStartingScale(
+                    oldScale);
+            ((PositionableEntity) scaleCmd.getEntity()).getStartingPosition(
+                    oldPos);
+
+            // Get the new position relative to the zone
+            newPos[0] += parentZonePos[0];
+            newPos[1] += parentZonePos[1];
+            newPos[2] += parentZonePos[2];
+
+        } else {
+            return;
+        }
+
+        performCollisionCheck(command);
+
+        performCollisionAnalysisHelper(entity, null, false, null, true);
+
+        // If there are no illegal collisions, just return. If there are
+        // illegal collisions, obtain the closest appropriate
+        // bounds of all the collisions and clamp the scale factor to that
+        // size - the fixed buffer specified in this class.
+        if (!hasIllegalCollisionHelper(entity)) {
+            return;
+        }
+
+System.out.println("SCALE_CLAMP applied to entity: " + entity);
+
+        SCALE_CLAMP_APPLIED = true;
+
+        // Determine if scale is increasing or decreasing and if doing so
+        // in the neagative or positive direction.
+        Boolean isIncreasingScale =
+            isScaleIncreasing(newScale, oldScale, axis);
+        Boolean isPositiveDirection =
+            isScaleInPositiveDirection(newPos, oldPos, axis);
+
+        if (isIncreasingScale == null ||
+                isPositiveDirection == null) {
+            return;
+        }
+
+        // Repeatedly used extraction values
+        float[] bounds = new float[6];
+        double[] position = new double[3];
+
+        // tracking minimum bounds value.
+        // The minBounds value is the farthest in the known scale direction
+        // that a scale can occur before it will hit a collision.
+        float minBounds = 0.0f;
+        Entity colEntity = null;
+
+        if (collisionEntities != null &&
+                collisionEntities.size() > 1) {
+
+            // remove all entities that are not of type MODEL
+            for (int i = (collisionEntities.size() - 1); i >= 0; i --) {
+
+                if (collisionEntities.get(i).getType() !=
+                    Entity.TYPE_MODEL) {
+
+                    collisionEntities.remove(i);
+                }
+            }
+
+            // If there is nothing left, just return
+            if (collisionEntities.size() == 0) {
+                return;
+            }
+
+            // Establish the first entity as our baseline for future
+            // comparison.
+            colEntity = collisionEntities.get(0);
+
+            if (colEntity instanceof PositionableEntity) {
+                ((PositionableEntity)colEntity).getBounds(bounds);
+                position = getPositionRelativeToZone(model, colEntity);
+            }
+        }
+
+        // Look for positive edge scale case first.
+        // Else case is the negative edge scale case.
+        if((isPositiveDirection && isIncreasingScale) ||
+                (!isPositiveDirection && !isIncreasingScale)) {
+
+            switch (axis) {
+
+            case XAXIS:
+                minBounds = bounds[0] + (float) position[0];
+                break;
+
+            case YAXIS:
+                minBounds = bounds[2] + (float) position[1];
+                break;
+
+            case ZAXIS:
+                minBounds = bounds[4] + (float) position[2];
+                break;
+
+            }
+
+        } else {
+
+            switch (axis) {
+
+            case XAXIS:
+                minBounds = bounds[1] + (float) position[0];
+                break;
+
+            case YAXIS:
+                minBounds = bounds[3] + (float) position[1];
+                break;
+
+            case ZAXIS:
+                minBounds = bounds[5] + (float) position[2];
+                break;
+
+            }
+        }
+
+        // Get the minimum bounds of remaining collision entities.
+        for (int i = 1; i < collisionEntities.size(); i++) {
+
+            colEntity = collisionEntities.get(i);
+
+            if (colEntity instanceof PositionableEntity) {
+                ((PositionableEntity)colEntity).getBounds(bounds);
+                position = getPositionRelativeToZone(model, colEntity);
+            } else {
+                continue;
+            }
+
+            float tmpMin = 0.0f;
+
+            // Look for positive edge scale case first.
+            // Else case is the negative edge scale case.
+            if((isPositiveDirection && isIncreasingScale) ||
+                    (!isPositiveDirection && !isIncreasingScale)) {
+
+                switch (axis) {
+
+                case XAXIS:
+                    tmpMin = bounds[0] + (float) position[0];
+                    break;
+
+                case YAXIS:
+                    tmpMin = bounds[2] + (float) position[1];
+                    break;
+
+                case ZAXIS:
+                    tmpMin = bounds[4] + (float) position[2];
+                    break;
+
+                }
+
+                minBounds = Math.min(minBounds, tmpMin);
+
+            } else {
+
+                switch (axis) {
+
+                case XAXIS:
+                    tmpMin = bounds[1] + (float) position[0];
+                    break;
+
+                case YAXIS:
+                    tmpMin = bounds[3] + (float) position[1];
+                    break;
+
+                case ZAXIS:
+                    tmpMin = bounds[5] + (float) position[2];
+                    break;
+
+                }
+
+                minBounds = Math.max(minBounds, tmpMin);
+            }
+        }
+
+        //-------------------------------------------------
+        // Now that we have the minimum bounds we need to
+        // compare that against the appropriate command and adjust
+        // the scale accordingly if it exceeds the minBounds of the
+        // closest collision.
+        //-------------------------------------------------
+
+        float comparativeBounds = 0.0f;
+
+        // Look for positive edge scale case first.
+        // Else case is the negative edge scale case.
+        if((isPositiveDirection && isIncreasingScale) ||
+                (!isPositiveDirection && !isIncreasingScale)) {
+
+            switch (axis) {
+
+            case XAXIS:
+
+                // For the XAXIS case this is the right edge of the scaling
+                // entity.
+                comparativeBounds = (float)
+                    (newPos[0] + (size[0] * newScale[0] / 2.0));
+
+                if (comparativeBounds > minBounds) {
+
+                    // for the XAXIS case this is the left edge of the
+                    // scaling entity.
+                    double oppositeBounds =
+                        oldPos[0] - (oldScale[0] * size[0] / 2.0);
+
+                    double maximumSize =
+                        minBounds - oppositeBounds - COLLISION_SEPARATION;
+
+                    newPos[0] = newPos[0] -
+                        (((newScale[0] * size[0]) - maximumSize) / 2.0) -
+                        COLLISION_SEPARATION;
+
+                    newScale[0] = (float) maximumSize / size[0];
+                }
+
+                break;
+
+            case YAXIS:
+
+                // For the YAXIS case this is the top edge of the scaling
+                // entity.
+                comparativeBounds = (float)
+                    (newPos[1] + (size[1] * newScale[1] / 2.0));
+
+                if (comparativeBounds > minBounds) {
+
+                    // for the YAXIS case this is the bottom edge of the
+                    // scaling entity.
+                    double oppositeBounds =
+                        oldPos[1] - oldScale[1] * size[1] /2.0;
+
+                    double maximumSize =
+                        minBounds - oppositeBounds - COLLISION_SEPARATION;
+
+                    newPos[1] = newPos[1] -
+                        (((newScale[1] * size[1]) - maximumSize) / 2.0) -
+                        COLLISION_SEPARATION;
+
+                    newScale[1] = (float) maximumSize / size[1];
+                }
+
+                break;
+
+            case ZAXIS:
+
+                // For the ZAXIS case this is the front edge of the scaling
+                // entity.
+                comparativeBounds = (float)
+                    (newPos[2] + (size[2] * newScale[2] / 2.0));
+
+                if (comparativeBounds > minBounds) {
+
+                    // for the ZAXIS case this is the back edge of the
+                    // scaling entity.
+                    double oppositeBounds =
+                        oldPos[2] - oldScale[2] * size[2] /2.0;
+
+                    double maximumSize =
+                        minBounds - oppositeBounds - COLLISION_SEPARATION;
+
+                    newPos[2] = newPos[2] -
+                        (((newScale[2] * size[2]) - maximumSize) / 2.0) -
+                        COLLISION_SEPARATION;
+
+                    newScale[2] = (float) maximumSize / size[2];
+                }
+
+                break;
+            }
+
+        } else {
+
+            switch (axis) {
+
+            case XAXIS:
+
+                // For the XAXIS case this is the left edge of the scaling
+                // entity.
+                comparativeBounds = (float)
+                    (newPos[0] - (size[0] * newScale[0] / 2.0));
+
+                if (comparativeBounds < minBounds) {
+
+                    // for the XAXIS case this is the right edge of the
+                    // scaling entity.
+                    double oppositeBounds =
+                        oldPos[0] + oldScale[0] * size[0] / 2.0;
+
+                    double maximumSize =
+                        oppositeBounds - minBounds - COLLISION_SEPARATION;
+
+                    newPos[0] = newPos[0] +
+                        (((newScale[0] * size[0]) - maximumSize) / 2.0) -
+                        COLLISION_SEPARATION;
+
+                    newScale[0] = (float) maximumSize / size[0];
+                }
+
+                break;
+
+            case YAXIS:
+
+                // For the YAXIS case this is the bottom edge of the
+                // scaling entity.
+                comparativeBounds = (float)
+                    (newPos[1] - (size[1] * newScale[1] / 2.0));
+
+                if (comparativeBounds < minBounds) {
+
+                    // for the YAXIS case this is the top edge of the
+                    // scaling entity.
+                    double oppositeBounds =
+                        oldPos[1] + oldScale[1] * size[1] / 2.0;
+
+                    double maximumSize =
+                        oppositeBounds - minBounds - COLLISION_SEPARATION;
+
+                    newPos[1] = newPos[1] +
+                        (((newScale[1] * size[1]) - maximumSize) / 2.0) -
+                        COLLISION_SEPARATION;
+
+                    newScale[1] = (float) maximumSize / size[1];
+                }
+
+                break;
+
+            case ZAXIS:
+
+                // For the ZAXIS case this is the back edge of the scaling
+                // entity.
+                comparativeBounds = (float)
+                    (newPos[2] - (size[2] * newScale[2] / 2.0));
+
+                if (comparativeBounds < minBounds) {
+
+                    // for the ZAXIS case this is the front edge of the
+                    // scaling entity.
+                    double oppositeBounds =
+                        oldPos[2] + oldScale[2] * size[2] / 2.0;
+
+                    double maximumSize =
+                        oppositeBounds - minBounds - COLLISION_SEPARATION;
+
+                    newPos[2] = newPos[2] +
+                        (((newScale[2] * size[2]) - maximumSize) / 2.0) -
+                        COLLISION_SEPARATION;
+
+                    newScale[2] = (float) maximumSize / size[2];
+                }
+
+                break;
+            }
+        }
+
+        // Set the adjusted values back
+        if (command instanceof ScaleEntityCommand) {
+
+            ScaleEntityCommand scaleCmd = (ScaleEntityCommand) command;
+
+            newPos[0] -= parentZonePos[0];
+            newPos[1] -= parentZonePos[1];
+            newPos[2] -= parentZonePos[2];
+
+            scaleCmd.setNewPosition(newPos);
+            scaleCmd.setNewScale(newScale);
+
+        } else if (command instanceof ScaleEntityTransientCommand) {
+
+            ScaleEntityTransientCommand scaleCmd =
+                (ScaleEntityTransientCommand) command;
+
+            newPos[0] -= parentZonePos[0];
+            newPos[1] -= parentZonePos[1];
+            newPos[2] -= parentZonePos[2];
+
+            scaleCmd.setPosition(newPos);
+            scaleCmd.setScale(newScale);
+        }
+    }
+
+    /**
+     * Move all of the other immediate children of the parent, that are not
+     * auto added entities, by the position correction amount.
+     *
+     * @param model WorldModel to reference
+     * @param parentEntity Parent entity to extract children from
+     * @param fixedEntityCorrection Position correction amount
+     * @param isTransient Is transient state flag
+     * @return List of commands generated
+     */
+    private ArrayList<Command> moveAllNonAutoAddChildren(
+            WorldModel model,
+            Entity parentEntity,
+            double[] fixedEntityCorrection,
+            boolean isTransient) {
+
+         ArrayList<Entity> allChildren = parentEntity.getChildren();
+         ArrayList<Command> cmdList = new ArrayList<Command>();
+
+         for (Entity child : allChildren) {
+
+            double[] startPos = new double[3];
+            double[] endPos = new double[3];
+
+            // Don't process any other auto adds
+            Boolean isAutoAdd = (Boolean)
+                RulePropertyAccessor.getRulePropertyValue(
+                        child,
+                        ChefX3DRuleProperties.IS_AUTO_ADD_PRODUCT);
+
+            if (isAutoAdd) {
+                continue;
+            }
+
+            // Must be a positionable entity for us to do anything with it
+             if (child instanceof PositionableEntity) {
+
+                 ((PositionableEntity)child).getStartingPosition(startPos);
+
+             } else {
+                 continue;
+             }
+
+             endPos[0] = startPos[0] + fixedEntityCorrection[0];
+             endPos[1] = startPos[1] + fixedEntityCorrection[1];
+             endPos[2] = startPos[2] + fixedEntityCorrection[2];
+
+             Command mvCmd = null;
+
+             if (isTransient) {
+
+                mvCmd = new MoveEntityTransientCommand(
+                        model,
+                        model.issueTransactionID(),
+                        child.getEntityID(),
+                        endPos,
+                        new float[] {0.0f, 0.0f, 0.0f});
+             } else {
+
+                mvCmd = new MoveEntityCommand(
+                        model,
+                        model.issueTransactionID(),
+                        child.getEntityID(),
+                        endPos,
+                        startPos);
+             }
+
+             cmdList.add(mvCmd);
+         }
+
+         return cmdList;
+    }
+}

@@ -1,0 +1,68 @@
+#*********************************************************************
+#
+#  (C) 2001-02 Yumetech, Inc
+#    http://www.yumetech.com/
+#
+# Package makefile producing chefx3d.jar
+#
+# Author: Justin Couch
+# Version: $Revision: 1.24 $
+#
+#*********************************************************************
+
+# Describe every directory that you want included in the JAR file here.
+# This is not recursive, so if you want parent directory and the
+# sub-directory, say so. These directories should not have '/' appended.
+JAR_CONTENT=org/chefx3d \
+  org/chefx3d/preferences \
+  org/chefx3d/tool \
+  org/chefx3d/toolbar \
+  org/chefx3d/toolbar/awt \
+  org/chefx3d/view \
+  org/chefx3d/view/common \
+  org/chefx3d/view/awt \
+  org/chefx3d/view/awt/entitytree \
+  org/chefx3d/view/awt/scenemanager \
+  org/chefx3d/view/awt/av3d \
+  org/chefx3d/view/net \
+  org/chefx3d/view/net/xmpp \
+  org/chefx3d/property \
+  org/chefx3d/property/awt \
+  org/chefx3d/util \
+  org/chefx3d/model \
+  org/chefx3d/rules/util \
+  org/chefx3d/rules/controller \
+  org/chefx3d/rules/definitions \
+  org/chefx3d/rules/engines \
+  org/chefx3d/rules/interpreters \
+  org/chefx3d/rules/properties \
+  org/chefx3d/rules/properties/accessors \
+  org/chefx3d/rules/catalog \
+  org/chefx3d/catalog \
+  org/chefx3d/cache \
+  org/chefx3d/cache/loader \
+  org/chefx3d/cache/content \
+  org/chefx3d/cache/event \
+  org/chefx3d/cache/javanet/protocol/http \
+  org/chefx3d/cache/javanet/protocol/https \
+  org/chefx3d/cache/protocol \
+  org/chefx3d/cache/protocol/http \
+  org/chefx3d/cache/protocol/https \
+  org/chefx3d/cache/protocol/jar \
+  org/chefx3d/catalog/util \
+  org/chefx3d/catalog/util/awt \
+  org/chefx3d/actions/awt \
+  images/2d \
+  images/shading \
+  config/i18n \
+  config/view/av3d \
+  org/chefx3d/ui \
+  glsl/preview \
+  glsl/lineart \
+
+#  org/chefx3d/view/awt/gt2d \
+
+# Manifest file name. Stored in the make/manifest directory
+MANIFEST=chefx3d_all.mf
+
+include ${PROJECT_ROOT}/make/Makefile.jav

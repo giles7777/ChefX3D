@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Tools>
+  <Section name='Locations' title='Locations'>
+    <Chapter name='Grid' title='Grid'>
+      <Page description='Grid' name='Grid' title='Grid'
+         url='catalog/util/Locations/Grid/Grid.x3dv' >
+	     <ChefX3D toolType="TYPE_WORLD" sizeX="16" sizeY="0.1" sizeZ="16" />
+      </Page>
+    </Chapter>
+  </Section>
+
+  <Section name='Primitives' title='Primitives'>
+    <Chapter name='Box' title='Box'>
+      <Page description='Box' name='Box' title='Box' url='catalog/util/Primitives/Box/Box.x3d'>
+	     <ChefX3D toolType="TYPE_MODEL" sizeX="/ChefX3D/Box/@x" sizeY="/ChefX3D/Box/@y" sizeZ="/ChefX3D/Box/@z">
+		    <Box x="2" y="2" z="2" />
+		 </ChefX3D>         
+      </Page>
+    </Chapter>
+    <Chapter name='Cone' title='Cone'>
+      <Page description='Cone' name='Cone' title='Cone'
+         url='catalog/util/Primitives/Cone/Cone.x3d'>
+	     <ChefX3D sizeX="/ChefX3D/Cone/@bottomRadius * 2" sizeY="/ChefX3D/Cone/@height" sizeZ="/ChefX3D/Cone/@bottomRadius * 2" >
+		    <Cone bottom="TRUE" bottomRadius="1" height="2" side="TRUE" solid="TRUE" />
+		 </ChefX3D>                  
+      </Page>
+    </Chapter>
+    <Chapter name='Cylinder' title='Cylinder'>
+      <Page description='Cylinder' name='Cylinder' title='Cylinder'
+         url='catalog/util/Primitives/Cylinder/Cylinder.x3d'>
+	     <ChefX3D sizeX="/ChefX3D/Cylinder/@radius * 2" sizeY="/ChefX3D/Cylinder/@height" sizeZ="/ChefX3D/Cylinder/@radius * 2" >
+		    <Cylinder bottom="TRUE" height="2" radius="1" side="TRUE" solid="TRUE" top="TRUE" />
+		 </ChefX3D>                           
+      </Page>
+    </Chapter>
+    <Chapter name='Sphere' title='Sphere'>
+      <Page description='Sphere' name='Sphere' title='Sphere'
+         url='catalog/util/Primitives/Sphere/Sphere.x3d'>
+            <ChefX3D sizeX="/ChefX3D/Sphere/@radius * 2" sizeY="/ChefX3D/Sphere/@radius * 2" sizeZ="/ChefX3D/Sphere/@radius * 2" >
+               <Sphere radius="1" solid="TRUE" />
+            </ChefX3D>
+      </Page>
+    </Chapter>
+  </Section>
+    <Section name='Barriers' title='Barriers'>
+       <Chapter name='Fence' title='Fence'>
+          <Page description='NewFence' name='Sphere' title='New Fence'
+             url='catalog/Barriers/Fence.x3d'>
+             <ChefX3D toolType="TYPE_MULTI_SEGMENT_CREATE" segmentLength="-1">
+                 <Fence cornerType="0" span="TRUE" />
+                 <SegmentProperties>
+                 </SegmentProperties>
+             </ChefX3D>
+          </Page>
+          <Page description='AddToFence' name='Sphere' title='Add to Fence'
+             url='catalog/Barriers/Fence.x3d'>
+             <ChefX3D toolType="TYPE_MULTI_SEGMENT_ADD" />
+          </Page>
+          <Page description='Delete Fence' name='Sphere' title='Delete Fence'
+             url='catalog/Barriers/Fence.x3d'>
+             <ChefX3D toolType="TYPE_DELETE_SELECTION" />
+         </Page>
+       </Chapter>
+    </Section>
+</Tools>
+

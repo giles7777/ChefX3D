@@ -1,0 +1,29 @@
+#X3D V3.2 utf8
+
+PROFILE Immersive
+COMPONENT Navigation:3
+COMPONENT PickingSensor:1
+
+Viewpoint {
+   description "Top Down"
+   position 0 19.5 0
+   orientation 1 0 0 -1.57075
+}
+
+DEF SHAPES Group {   
+}
+
+DEF SC Script {
+   outputOnly MFNode shapes
+   initializeOnly SFFloat majorSpacing 10
+   initializeOnly SFFloat minorSpacing 1
+   initializeOnly SFInt32 number 159
+   initializeOnly SFFloat size 160
+   
+   url ["catalog.Locations.Grid.GridGenerator.class"]
+   
+}
+
+ROUTE SC.shapes TO SHAPES.set_children
+
+

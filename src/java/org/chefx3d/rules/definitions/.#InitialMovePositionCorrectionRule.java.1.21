@@ -1,0 +1,293 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2010
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+
+//Internal Imports
+import org.chefx3d.model.Command;
+import org.chefx3d.model.Entity;
+import org.chefx3d.model.LocationEntity;
+import org.chefx3d.model.MoveEntityCommand;
+import org.chefx3d.model.MoveEntityTransientCommand;
+import org.chefx3d.model.PositionableEntity;
+import org.chefx3d.model.TransitionEntityChildCommand;
+import org.chefx3d.model.WorldModel;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+
+/**
+ * Handles initial position corrections for move commands.
+ *
+ * @author Ben Yarger
+ * @version $Revision: 1.21 $
+ */
+public class InitialMovePositionCorrectionRule extends
+        InitialPositionCorrectionRule {
+
+    /** Static class instance */
+    private static InitialMovePositionCorrectionRule rule =
+        new InitialMovePositionCorrectionRule();
+
+    /** Private constructor. All Rule classes should be implemented this way. */
+    private InitialMovePositionCorrectionRule(){
+
+        ruleType = RULE_TYPE.INVIOLABLE;
+    }
+
+    /**
+     * Return class instance
+     * @return InitialMovePositionCorrectionRule
+     */
+    public static InitialMovePositionCorrectionRule getInstance(){
+        return rule;
+    }
+
+    @Override
+    protected boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command) {
+
+        // Only operate on positionable entities and models
+        if (!(entity instanceof PositionableEntity) ||
+                entity.getType() != Entity.TYPE_MODEL) {
+            return true;
+        }
+
+        Entity parentEntity = findAppropriateParent(command, model);
+
+System.out.println("parentEntity: " + parentEntity);
+        // If the parentEntity is null, set it to the active zone entity.
+        // We know that any entity whose parent is null will be moving
+        // relative to the active zone.
+        if (parentEntity == null) {
+            LocationEntity locationEntity = view.getActiveLocationEntity();
+            int activeZoneID = locationEntity.getActiveZoneID();
+            parentEntity = model.getEntity(activeZoneID);
+        }
+
+        // Apply results to appropriate command
+        if (command instanceof MoveEntityCommand) {
+
+            //
+            // Modify the incoming position
+            //
+            double[] position = new double[3];
+            ((MoveEntityCommand)command).getEndPosition(position);
+//          fixPosition(model, command, parentEntity, position);
+
+            // Adjust with depth changes
+            position[2] += calculateDepthChanges(
+                        command,
+                        model,
+                        entity,
+                        parentEntity);
+
+            // Make the special adjustment if the real parent entity and ideal
+            // parent entity are not the same.
+            if (parentEntity.getEntityID() != entity.getParentEntityID()) {
+
+                int parentEntityID = entity.getParentEntityID();
+                Entity realParentEntity = model.getEntity(parentEntityID);
+
+                double[] distanceBetweenParents =
+                    getDistanceBetweenEntities(
+                        model,
+                        parentEntity,
+                        realParentEntity);
+
+                if (distanceBetweenParents == null) {
+                    return true;
+                }
+
+                position[2] += distanceBetweenParents[2];
+            }
+
+            // Catch the special door and window case
+            handleDoorAndWindowCase(entity, position, false);
+
+            // Catch the auto-span case
+            handleAutoSpanCase(entity, position, false);
+
+            // Apply adjustments to position
+            ((MoveEntityCommand)command).setEndPosition(position);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            //
+            // Modify the position of the command, which is relative to the
+            // wall segment.
+            //
+            double[] position = new double[3];
+            ((MoveEntityTransientCommand)command).getPosition(position);
+
+            // Adjust with depth changes
+            position[2] += calculateDepthChanges(
+                        command,
+                        model,
+                        entity,
+                        parentEntity);
+
+            // Make the special adjustment if the real parent entity and ideal
+            // parent entity are not the same.
+            if (parentEntity.getEntityID() != entity.getParentEntityID()) {
+
+                int parentEntityID = entity.getParentEntityID();
+                Entity realParentEntity = model.getEntity(parentEntityID);
+
+                // Here we only respond to non walls because the standard
+                // is to move relative to the active zone.
+                /////////////////////////////////////////////////////////////////
+                // rem: this bollux's up the placement of door on a tower
+                // when there are drawers on the cabinet....
+                //if (realParentEntity != null &&
+                //        realParentEntity.getType() == Entity.TYPE_MODEL) {
+                if (realParentEntity != null) {
+                /////////////////////////////////////////////////////////////////
+
+                    double[] distanceBetweenParents =
+                        getDistanceBetweenEntities(
+                            model,
+                            realParentEntity,
+                            parentEntity);
+
+                    if (distanceBetweenParents == null) {
+                        return true;
+                    }
+
+                    position[2] += distanceBetweenParents[2];
+                }
+            }
+
+//          fixPosition(model, command, parentEntity, position);
+
+            // Catch the special door and window case
+            handleDoorAndWindowCase(entity, position, true);
+
+            // Catch the auto-span case
+            handleAutoSpanCase(entity, position, true);
+
+            // Apply the adjustment to the position
+            ((MoveEntityTransientCommand)command).setPosition(
+                    position);
+
+            ((MoveEntityTransientCommand)command).setPickParentEntity(
+                    parentEntity);
+
+        } else if (command instanceof TransitionEntityChildCommand) {
+            //
+            // Modify the position of the command, which is relative to the
+            // wall segment.
+            //
+            double[] position = new double[3];
+            ((TransitionEntityChildCommand)command).getEndPosition(position);
+//          fixPosition(model, command, parentEntity, position);
+
+            double depthChange = 0.0;
+
+            if (command.isTransient()) {
+                // Adjust with depth changes
+                depthChange = calculateDepthChanges(
+                            command,
+                            model,
+                            entity,
+                            parentEntity);
+
+                position[2] += depthChange;
+            }
+
+            // Make the special adjustment for the non transient case
+            if (!command.isTransient()) {
+
+                Entity endParent =
+                    ((TransitionEntityChildCommand)command).
+                    getEndParentEntity();
+
+                if (endParent.getEntityID() != parentEntity.getEntityID()) {
+
+                    double[] distanceBetweenParents =
+                        getDistanceBetweenEntities(
+                            model,
+                            endParent,
+                            parentEntity);
+
+                    if (distanceBetweenParents == null) {
+                        return true;
+                    }
+
+                    position[0] += distanceBetweenParents[0];
+
+                    position[1] += distanceBetweenParents[1];
+
+                    position[2] += distanceBetweenParents[2] - depthChange;
+
+                    ((TransitionEntityChildCommand)command).setEndParentEntity(
+                            parentEntity);
+
+                }
+            }
+
+            // Catch the special door and window case
+            handleDoorAndWindowCase(entity, position, command.isTransient());
+
+            // Catch the auto-span case
+            handleAutoSpanCase(entity, position, command.isTransient());
+
+            ((TransitionEntityChildCommand)command).setEndPosition(
+                    position);
+
+        }
+
+        return true;
+    }
+
+
+    //--------------------------------------------------------------------
+    // Private methods
+    //--------------------------------------------------------------------
+
+    /**
+     * Certain types of models are embedded into the cut-outs
+     * in the segment, rather than being placed on the surface
+     * This should override the depth amount set as we assume
+     * doors and windows are being set into walls and can then
+     * easily determine what the actual depth value should be.
+     *
+     * @param entity Entity to examine
+     * @param position position of entity to adjust depth for
+     * @param isTransient Is the entity in a transient state
+     */
+    private void handleAutoSpanCase(
+            Entity entity,
+            double[] position,
+            boolean isTransient) {
+
+        Boolean autoSpan = (Boolean)
+        RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.SPAN_OBJECT_PROP);
+
+        if(autoSpan != null && autoSpan){
+            Float zOffset = (Float)
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.SPAN_OBJECT_DEPTH_OFFSET_PROP);
+
+            position[2] = zOffset;
+
+        }
+    }
+
+
+}

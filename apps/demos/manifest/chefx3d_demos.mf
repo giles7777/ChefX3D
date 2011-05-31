@@ -1,0 +1,11 @@
+Main-Class: demos.SimpleExample
+Class-Path: chefx3d_all_3.0.0.jar chefx3d_tools_3.0.0.jar 
+ xj3d-all_2.0.0.jar gt2-api-2.4.4.jar gt2-render-2.4.4.jar 
+ jogl.jar
+Extension-Name: chefx3d_demos
+Specification-Vendor: Web3d Consortium
+Specification-Version: 3.0
+Implementation-Vendor-Id: com.yumetech
+Implementation-Vendor: Yumetech, Inc
+Implementation-Version: 3.0
+Implementation-Title: ChefX3D Tools

@@ -1,0 +1,107 @@
+<html>
+<head>
+<title>ChefX3D - Tool Design</title>
+</head>
+
+<body>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+</center>
+
+<h1 align=center>Tool Design</h1>
+
+<p>
+A tool is an authoring widget which can create entities.  How that is accomplisted
+is dependent on the tool.
+</p>
+
+<hr/>
+
+<a name="Concepts">
+<h2>Concepts</h2></a>
+
+<p>
+<h3>Tool Types</h3>
+<p>
+The tool panel is where tools are selected for authoring.  Tool operation is
+determined by its tool type.  The following tool types are supported:
+<ul>
+   <li>World - Specifies the base location</li>
+   <li>Model - A locatable visual model</li>
+   <li>MultiSegment - A set of lines</li>
+   <li>Building - Building design tool</li>
+   <li>Helper - A helper tool</li>
+   <li>Controller - Controlls other entities</li>
+</ul>
+<p>
+
+
+<h4>World</h4>
+<p>
+A scenario has one base location of operations.  The model is expected to
+be located in world coordinates and cannot be transformed.  A location should
+provide the input needed for all application views.  If its not provided then the
+application will not disable that view.
+<p>
+A world may have a parameter space.
+</p>
+<h4>Model</h4>
+<p>
+A Model is a tool which can be positioned in 3 space.  Its created
+by dragging the model onto the Main Window.  This will create a new Entity using
+that model as the visual.  A model is backed by an X3D model and contains an XML
+description of its parameter space.  Those parameters are modified in the Property
+editor.  A behavior can be associated with an entity to drive it.
+<p>
+<h4>MultiSegment</h4>
+<p>
+A multi-segment tool is composed of several segments.  The combined object can have
+a set of properties.  Another set of properties(Segement Properties) are available on each segment.
+Authoring continues to create new segments until the tool is exited.
+<p>
+<h4>Selection</h4>
+<p>
+A Selection tool performs an operation on the current selection set.  After the operation is performed
+the selection set will be cleared.
+<p>
+<h4>Building</h4>
+<p>
+The building tool is for authoring rough building models.  This will handle authoring a floor plan,
+the number of stories and a simple roof line.  A simple texturing panel will allow textures for the
+building sides and roof.
+TODO: Not sure this is a really a tool type.
+<p>
+</p>
+<h4>Helper</h4>
+A helper tool is not a standalone entity.  It is edited exactly like a Model, but it will
+not be treated the same for export.
+<p>
+<h4>Controller</h4>
+An entity which controls other entities.  The location of this entity does not matter.
+An example might be a Time device or the end conditions for a simulation.
+<p>
+<h3>Implementation</h3>
+<p>
+Every <a href="view.html">View<a/> in the system will need to understand how to render
+each tool type.  Each tool will have at least a 2D image representation.  A view that has no
+specific understanding of a tool can use this to render it.
+</p>
+<hr>
+
+<h2>Open Issues</h2>
+<hr>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+<br>
+<i>Last Updated: $Date: 2007/05/03 22:20:09 $<br>
+Version: $Revision: 1.2 $</I>
+</center>
+
+</body>
+</html>

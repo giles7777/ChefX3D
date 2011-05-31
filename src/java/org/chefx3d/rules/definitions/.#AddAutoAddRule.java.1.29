@@ -1,0 +1,1124 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+import java.util.ArrayList;
+
+//Internal Imports
+import org.chefx3d.model.AddEntityChildCommand;
+import org.chefx3d.model.BasePositionableEntity;
+import org.chefx3d.model.Command;
+import org.chefx3d.model.Entity;
+import org.chefx3d.model.WorldModel;
+import org.chefx3d.model.PositionableEntity;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS;
+import org.chefx3d.tool.DefaultEntityBuilder;
+import org.chefx3d.tool.SimpleTool;
+
+
+/**
+ * Auto add children to product depending on children rules. Results from
+ * add command.
+ *
+ * @author Ben Yarger
+ * @version $Revision: 1.29 $
+ */
+public class AddAutoAddRule extends AutoAddRule {
+
+    /** Cannot add because of auto add collision message */
+    private static final String POP_UP_NO_ADD =
+        "org.chefx3d.rules.definitions.AddAutoAddRule.addCanceled";
+
+    /**
+     * Directional span indicators
+     */
+    private enum SPAN_AXIS {XAXIS, YAXIS, ZAXIS};
+
+    /** Static class instance */
+    private static AddAutoAddRule rule =
+        new AddAutoAddRule();
+
+
+    private float[] autoAddNegOffset;
+
+    private float[] autoAddPosOffset;
+
+    /**
+     * Private constructor. All Rule classes should be implemented this way.
+     */
+    private AddAutoAddRule(){
+
+        ruleType = RULE_TYPE.INVIOLABLE;
+    }
+
+    /**
+     * Return class instance
+     * @return CanRotateRule
+     */
+    public static AddAutoAddRule getInstance(){
+        return rule;
+    }
+
+    @Override
+    protected boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command) {
+
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+        ArrayList<Command> tmpList = new ArrayList<Command>();
+
+        tmpList = addInvisbleChildren(model, entity);
+        multiCmdList.addAll(tmpList);
+
+        Entity parentEntityParentEntity = null;
+
+        if(command instanceof AddEntityChildCommand){
+
+            parentEntityParentEntity = ((AddEntityChildCommand)command).getParentEntity();
+        }
+
+        tmpList = addAutoPlaceChildren(model, entity, parentEntityParentEntity, command);
+        multiCmdList.addAll(tmpList);
+
+        // If any of the command slots are null, it is because there was some
+        // event that prevented the auto add item. If this is the case, we do
+        // not allow the command.
+        for(int i = 0; i < multiCmdList.size(); i++) {
+
+            if (multiCmdList.get(i) == null) {
+                String msg = intl_mgr.getString(POP_UP_NO_ADD);
+                popUpMessage.showMessage(msg);
+                return false;
+            }
+        }
+
+        tmpList = addAutoEndPlacement(model, entity, parentEntityParentEntity);
+        multiCmdList.addAll(tmpList);
+
+        addNewlyIssuedCommand(multiCmdList);
+
+        return true;
+    }
+
+    /**
+     * Adds one of each invisible child set to the parent entity.
+     *
+     * @param model WorldModel
+     * @param parentEntity Entity
+     * @return ArrayList<Command> add invisible children command list
+     */
+    private ArrayList<Command> addInvisbleChildren(WorldModel model, Entity parentEntity){
+
+        String[] invisibleChildren =
+            (String[])
+            parentEntity.getProperty(Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.INVISIBLE_CHILDREN_TOOLS_PROP);
+
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        if(invisibleChildren != null){
+
+            for(int i = 0; i < invisibleChildren.length; i++){
+
+                SimpleTool simpleTool =
+                    getSimpleToolByName(invisibleChildren[i]);
+
+                if(simpleTool != null){
+
+                    // Create the new invisible entity
+                    int entityID = model.issueEntityID();
+
+                    if(entityBuilder == null){
+                        entityBuilder = DefaultEntityBuilder.getEntityBuilder();
+                    }
+
+                    Entity newEntity = entityBuilder.createEntity(
+                            model,
+                            entityID,
+                            new double[] {0.0, -200.0, 0.0},
+                            new float[] {0.0f, 1.0f, 0.0f, 0.0f},
+                            simpleTool);
+
+                    // clear out the 'bogus' property
+                    newEntity.setProperty(
+                            newEntity.getParamSheetName(),
+                            Entity.SHADOW_ENTITY_FLAG,
+                            false,
+                            false);
+
+                    // Set the is auto add flag
+                    newEntity.setProperty(
+                            Entity.DEFAULT_ENTITY_PROPERTIES,
+                            ChefX3DRuleProperties.IS_AUTO_ADD_PRODUCT,
+                            true,
+                            false);
+
+                    AddEntityChildCommand addChildCmd =
+                        new AddEntityChildCommand(model, parentEntity, newEntity);
+
+                    multiCmdList.add(addChildCmd);
+                }
+            }
+        }
+
+        return multiCmdList;
+    }
+
+    /**
+     * Auto place children included in the AUTO_PLACE_OBJECT_TOOLS_PROP.
+     *
+     * @param model WorldModel
+     * @param entity Entity
+     * @return ArrayList<Command> add commands
+     */
+    private ArrayList<Command> addAutoPlaceChildren(WorldModel model,
+                                                    Entity parentEntity,
+                                                    Entity parentEntityParentEntity,
+                                                    Command command){
+
+        String[] autoPlaceChildren = (String[])
+            parentEntity.getProperty(Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.AUTO_PLACE_OBJECT_TOOLS_PROP);
+
+System.out.println("Autoplace Children: " + java.util.Arrays.toString(autoPlaceChildren));
+        //
+        // EMF: These are the new properties added specifically for ticket #3.
+        //
+        // Ben writes:
+        //
+        // NOTE: THE KEY TO THIS WORKING IS THE ORDERING
+        // REQUIREMENT THAT ALL AUTO PLACE DATA SETS
+        // MATCH THE ORDER OF THE CX.autoPlObj DATA SET.
+        //
+        // To emphasize the point, CX.autoAddAxis, CX.autoAddNegOffset,
+        // CX.autoAddPosOffset and CX.autoAddStepSize are matched by
+        // index to the CX.autoPlObj listing.
+        //
+        String[] autoPlaceObjectsProp = (String[]) parentEntity.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.AUTO_PLACE_OBJECTS_PROP);
+
+        float[] autoAddStepSize = (float[]) parentEntity.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.AUTO_ADD_STEP_SIZE);
+
+        Enum[] autoAddAxis = (Enum[]) parentEntity.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.AUTO_ADD_AXIS);
+
+        autoAddNegOffset = (float[]) parentEntity.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.AUTO_ADD_NEG_OFFSET);
+
+        autoAddPosOffset = (float[]) parentEntity.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.AUTO_ADD_POS_OFFSET);
+
+        int[] autoAddEndPlacements = (int[]) parentEntity.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.AUTO_ADD_END_PLACEMENTS);
+
+
+        //
+        // Is the collision case set?  If so,
+        // we need to add an option to auto place at
+        // every collision with a specific entity as
+        // an alternate auto place algorithm.
+        //
+        Boolean autoAddByCol = (Boolean)
+            parentEntity.getProperty(Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.AUTO_ADD_BY_COL);
+
+        // Force fit operation that will attempt to place the auto add product
+        // to the immediate left and right of the collision found
+        int[] forceFitFlags =
+            (int []) parentEntity.getProperty(
+                    Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.AUTO_ADD_FORCE_FIT);
+
+        //
+        // defensive coding: check if we should break early
+        // in case the required properties are not set
+        //
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        if( autoPlaceObjectsProp == null ||
+            autoAddStepSize == null ||
+            autoAddAxis == null)
+            return multiCmdList;
+
+        //
+        // This code calculates the center position of
+        // the parentEntity relative to the zone.
+        // Since it is not yet parented, we sadly cannot make a direct
+        // call to getPositionRelativeToZone(model, parentEntity).
+        //
+        // Instead, we getPosition() of the parentEntity, and then combine
+        // that with the position of the parentEntityParentEntity.
+        //
+        double[] parentEntityPos = new double[3];
+        double[] parentEntityParentEntityPos =
+            getPositionRelativeToZone(model, parentEntityParentEntity);
+        ((PositionableEntity)parentEntity).getPosition(parentEntityPos);
+
+        parentEntityPos[0] += parentEntityParentEntityPos[0];
+        parentEntityPos[1] += parentEntityParentEntityPos[1];
+        parentEntityPos[2] += parentEntityParentEntityPos[2];
+
+        // working variable
+        ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS adjAxis;
+
+        //
+        // Generate a command for each auto placement and add it to multiCmdList
+        //
+        for(int i = 0; i < autoPlaceObjectsProp.length; i++){
+
+            if ((autoAddEndPlacements != null) && (autoAddEndPlacements[i] != 0)) {
+                continue;
+            }
+            //
+            // set up working variables
+            //
+            SimpleTool simpleTool =
+                getSimpleToolByName(autoPlaceObjectsProp[i]);
+
+            adjAxis = (ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS)
+            autoAddAxis[i];
+
+            boolean forceFit = false;
+
+            if (forceFitFlags != null) {
+
+                if (forceFitFlags[i] == 1) {
+
+                    forceFit = true;
+                }
+            }
+
+
+            // Perform collision check to see what we are working with.
+            // Requires doing collision analysis
+            performCollisionCheck(command);
+
+            boolean addAtCollisionPoint = false;
+            ArrayList<String> collisionEntityClassifications =
+                new ArrayList<String>();
+
+            // pocket the classification names from each collision
+            for(Entity e : collisionEntities){
+                String[] classifications = ((String[])
+                    e.getProperty(Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.CLASSIFICATION_PROP));
+                for(String s : classifications)
+                    collisionEntityClassifications.add(s);
+            }
+
+
+            String[] relClass = (String[]) simpleTool.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP);
+
+
+            //
+            // Only add autoAddChild at the collision point
+            // if the right kind of collisions exist.
+            //
+            if( autoAddByCol                &&
+                relClass != null            &&
+                collisionEntities != null   &&
+                collisionEntities.size() >= 0) {
+
+                // look through the reserved class relationships
+                // and see if any collision is allowable
+                for(int b = 0; b < relClass.length; b++) {
+                    if( collisionEntityClassifications.contains( relClass[b]))
+                        addAtCollisionPoint = true;
+                }
+            }
+
+            if( addAtCollisionPoint ){
+
+                for( Entity e : collisionEntities ){
+
+                    double[] intersection =
+                        getPositionRelativeToZone(model, e);
+
+                    switch( adjAxis ){
+                    case XAXIS:
+                        intersection[0] -= parentEntityPos[0];
+                        intersection[1] = 0;
+                        intersection[2] = 0;
+                        break;
+                    case YAXIS:
+                        intersection[0] = 0;
+                        intersection[1] -= parentEntityPos[1];
+                        intersection[2] = 0;
+                        break;
+                    }
+
+//System.out.println("autoAddChild position: >  " + java.util.Arrays.toString(intersection));
+
+                    AddEntityChildCommand aecc =
+
+                        issueNewAddChildCommand(
+                            model,
+                            parentEntity,
+                            parentEntityParentEntity,
+                            simpleTool,
+                            intersection,
+                            new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                            true,
+                            forceFit,
+                            adjAxis,
+                            ORIENTATION.DEFAULT);
+
+                    multiCmdList.add(aecc);
+                }
+            } else {
+                //
+                // "Normal" (non-collision) handling.
+                //
+                // Depending on the value of autoAddAxis[i], this will perform
+                // either horizontal placement - adds products right to left,
+                // vertical placement - add products top to bottom, or
+                // depth placement - add products front to back
+                //
+                ArrayList<Command> addCommands =
+                    createChildrenAlongSpan(
+                        adjAxis,
+                        (double)autoAddStepSize[i],
+                        (BasePositionableEntity) parentEntity,
+                        parentEntityParentEntity,
+                        simpleTool,
+                        model,
+                        forceFit);
+
+                //
+                // EMF: If a set of objects could not be placed,
+                // there will be nulls in the addCommands list.
+                //
+                // We DO want multiCmdList to contain null values if no
+                // addCommands could be issued (in order to trigger the
+                // error popupMessage).  But if there are successful add
+                // commands, then we want to remove all the null commands
+                // from the list.
+                //
+                if(multiCmdList.contains(null)){
+                    multiCmdList = addCommands;
+
+                } else if( !addCommands.contains(null)){
+                    multiCmdList.addAll(addCommands);
+                }
+            }
+        }
+        return multiCmdList;
+    }
+
+
+    /**
+     * Create children along a span defined as a particular axis by the
+     * SPAN_AXIS value passed in.
+     *
+     * @param axis SPAN_AXIS enum value
+     * @param stepSize double step size
+     * @param parentEntity BasePositionableEntity parent to add children to
+     * @param parentEntityParentEntity Parent entity to parentEntity
+     * @param simpleTool SimpleTool to create children with
+     * @param model WorldModel to apply commands
+     * @param forceFit Flags force fitting of auto place products
+     * @return ArrayList<Command> list of add child commands
+     */
+    private ArrayList<Command> createChildrenAlongSpan(
+            TARGET_ADJUSTMENT_AXIS axis,
+            double stepSize,
+            BasePositionableEntity parentEntity,
+            Entity parentEntityParentEntity,
+            SimpleTool simpleTool,
+            WorldModel model,
+            boolean forceFit){
+
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+
+        /*
+         * Avoid divide by zero
+         */
+        if(stepSize == 0.0){
+            return multiCmdList;
+        }
+
+        pullBorderBufferValues(simpleTool);
+
+        /*
+         * examine parentEntity for useful data
+         */
+        double[] parentPos = new double[3];
+        float[] parentBounds = new float[6];
+
+        parentEntity.getPosition(parentPos);
+        parentEntity.getBounds(parentBounds);
+
+        double spanDistance = 0.0;
+
+        switch(axis){
+            case XAXIS:
+                spanDistance = parentBounds[1] * 2.0 - rightBorder - leftBorder;
+                break;
+            case YAXIS:
+                spanDistance = parentBounds[3] * 2.0 - topBorder - bottomBorder;
+                break;
+            case ZAXIS:
+                spanDistance = parentBounds[5] * 2.0 - frontBorder - backBorder;
+                break;
+        }
+
+        /*
+         * Calculate number of entities to add along span
+         */
+        int quantityToAdd = (int) (spanDistance / stepSize) + 1;
+
+        // If there is a remainder, add an extra entity
+        double remainder = (spanDistance % stepSize);
+        if(remainder > 0.0){
+            quantityToAdd++;
+        }
+
+        // Distance between end products added
+        double distanceBetween = 0.0;
+
+        /*
+         * Calculate first child position
+         */
+        double[] firstChildPos = new double[3];
+
+        if ( autoAddPosOffset == null) {
+            autoAddPosOffset = new float[] {0,0,0};
+        }
+
+        //if both offsets are the same and equal to the width of the parent object
+        //the children will swap places.
+//System.out.println("autoAddPosOffset: " + autoAddPosOffset[0] );//+ " Y: " + autoAddPosOffset[1]);
+        switch(axis){
+            case XAXIS:
+                firstChildPos[0] = firstChildPos[0] +
+                            parentBounds[1] - rightBorder -autoAddPosOffset[0];
+                firstChildPos[1] = firstChildPos[1];
+                firstChildPos[2] = firstChildPos[2];
+                break;
+            case YAXIS:
+                firstChildPos[0] = firstChildPos[0];
+                firstChildPos[1] = firstChildPos[1] +
+                            parentBounds[3] - topBorder -autoAddPosOffset[1];
+                firstChildPos[2] = firstChildPos[2];
+                break;
+            case ZAXIS:
+                firstChildPos[0] = firstChildPos[0];
+                firstChildPos[1] = firstChildPos[1];
+                firstChildPos[2] = firstChildPos[2] +
+                            parentBounds[5] - frontBorder -autoAddPosOffset[2];
+                break;
+        }
+
+        /*
+         * Calcualte second child position
+         */
+        double[] secondChildPos = new double[3];
+        if ( autoAddNegOffset == null) {
+            autoAddNegOffset = new float[] {0,0,0};
+        }
+
+//System.out.println("autoAddNegOffset: " + autoAddNegOffset[0] //+ " Y: " + autoAddNegOffset[1]);
+        switch(axis){
+            case XAXIS:
+                secondChildPos[0] = secondChildPos[0] +
+                            parentBounds[0] + leftBorder + autoAddNegOffset[0];
+                secondChildPos[1] = secondChildPos[1];
+                secondChildPos[2] = secondChildPos[2];
+
+                distanceBetween = firstChildPos[0] - secondChildPos[0];
+                break;
+            case YAXIS:
+                secondChildPos[0] = secondChildPos[0];
+                secondChildPos[1] = secondChildPos[1] +
+                            parentBounds[2] + bottomBorder + autoAddNegOffset[1];
+                secondChildPos[2] = secondChildPos[2];
+
+                distanceBetween = firstChildPos[1] - secondChildPos[1];
+                break;
+            case ZAXIS:
+                secondChildPos[0] = secondChildPos[0];
+                secondChildPos[1] = secondChildPos[1];
+                secondChildPos[2] = secondChildPos[2] +
+                            parentBounds[4] + backBorder + autoAddNegOffset[2];
+
+                distanceBetween = firstChildPos[2] - secondChildPos[2];
+                break;
+        }
+
+        // Add first product
+        if(quantityToAdd > 0){
+
+            AddEntityChildCommand addCmd =
+                    issueNewAddChildCommand(
+                        model,
+                        parentEntity,
+                        parentEntityParentEntity,
+                        simpleTool,
+                        firstChildPos,
+                        new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                        true,
+                        forceFit,
+                        axis,
+                        ORIENTATION.DEFAULT);
+            multiCmdList.add(addCmd);
+        }
+
+        // Add second product
+        if(quantityToAdd > 1){
+
+            AddEntityChildCommand addCmd =
+                    issueNewAddChildCommand(
+                        model,
+                        parentEntity,
+                        parentEntityParentEntity,
+                        simpleTool,
+                        secondChildPos,
+                        new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                        true,
+                        forceFit,
+                        axis,
+                        ORIENTATION.DEFAULT);
+
+            multiCmdList.add(addCmd);
+        }
+
+        if(quantityToAdd > 2){
+            // Add remaining in between
+            double posStep = distanceBetween/(quantityToAdd-1);
+
+            for(int i = 2; i < quantityToAdd; i++){
+
+                double offset = posStep * (i - 1);
+
+                double[] childPos = new double[3];
+
+                switch(axis){
+                    case XAXIS:
+                        childPos[0] = firstChildPos[0] - offset;
+                        childPos[1] = firstChildPos[1];
+                        childPos[2] = firstChildPos[2];
+                        break;
+                    case YAXIS:
+                        childPos[0] = firstChildPos[0];
+                        childPos[1] = firstChildPos[1] - offset;
+                        childPos[2] = firstChildPos[2];
+                        break;
+                    case ZAXIS:
+                        childPos[0] = firstChildPos[0];
+                        childPos[1] = firstChildPos[1];
+                        childPos[2] = firstChildPos[2] - offset;
+                        break;
+                }
+
+                AddEntityChildCommand addCmd =
+                        issueNewAddChildCommand(
+                            model,
+                            parentEntity,
+                            parentEntityParentEntity,
+                            simpleTool,
+                            childPos,
+                            new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                            true,
+                            forceFit,
+                            axis,
+                            ORIENTATION.DEFAULT);
+
+                multiCmdList.add(addCmd);
+            }
+        }
+
+        return multiCmdList;
+    }
+
+
+    /**
+     * Add n copies of a given product at the absolute positions
+     * specified in the rule properties for the given product.
+     *
+     * @param model
+     * @param parentEntity
+     * @param parentEntityParentEntity
+     * @param simpleTool
+     * @return ArrayList<Command> list of add commands
+     */
+    private ArrayList<Command> autoPlaceNUnits(
+            WorldModel model,
+            Entity parentEntity,
+            Entity parentEntityParentEntity,
+            SimpleTool simpleTool){
+
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        // If parentEntity is not of type BasePositionableEntity, return
+        if(!(parentEntity instanceof BasePositionableEntity)){
+
+            return multiCmdList;
+        }
+
+        // Get the absolute snap values
+        float[] xAxisAbsSnapf = (float[]) simpleTool.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.AUTO_ADD_N_X_POS_PROP);
+
+        float[] yAxisAbsSnapf = (float[]) simpleTool.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.AUTO_ADD_N_Y_POS_PROP);
+
+        float[] zAxisAbsSnapf = (float[]) simpleTool.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.AUTO_ADD_N_Z_POS_PROP);
+
+        /*
+         * Horizontal placement - adds products horizontally
+         */
+        if(xAxisAbsSnapf != null){
+
+            multiCmdList = createNProducts(
+                    SPAN_AXIS.XAXIS,
+                    xAxisAbsSnapf,
+                    (BasePositionableEntity) parentEntity,
+                    parentEntityParentEntity,
+                    simpleTool,
+                    model);
+
+        }
+
+        /*
+         * Vertical placement - adds products top to bottom
+         */
+        if(yAxisAbsSnapf != null){
+
+            multiCmdList = createNProducts(
+                    SPAN_AXIS.YAXIS,
+                    yAxisAbsSnapf,
+                    (BasePositionableEntity) parentEntity,
+                    parentEntityParentEntity,
+                    simpleTool,
+                    model);
+        }
+
+        /*
+         * Depth placement - adds products front to back
+         */
+        if(zAxisAbsSnapf != null){
+
+            multiCmdList = createNProducts(
+                    SPAN_AXIS.ZAXIS,
+                    zAxisAbsSnapf,
+                    (BasePositionableEntity) parentEntity,
+                    parentEntityParentEntity,
+                    simpleTool,
+                    model);
+        }
+
+        return multiCmdList;
+    }
+
+    /**
+     * Attempts to place children based on their incremental step.
+     *
+     * @param model WorldModel
+     * @param parentEntity Entity
+     * @param parentEntityParentEntity Parent Entity of parentEntity
+     * @param simpleTool SimpleTool
+     * @return ArrayList<Command> list of add commands
+     */
+/*  private ArrayList<Command> autoPlaceChildBasedOnIncrementalStep(
+            WorldModel model,
+            Entity parentEntity,
+            Entity parentEntityParentEntity,
+            SimpleTool simpleTool){
+
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        // If parentEntity is not of type BasePositionableEntity, return
+        if(!(parentEntity instanceof BasePositionableEntity)){
+
+            return multiCmdList;
+        }
+
+        // If the simpleTool does not have incremental step information, return
+        Boolean usesIncrementalSnaps = (Boolean) simpleTool.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.MOVEMENT_USES_INCREMENTAL_SNAPS_PROP);
+
+        if(!usesIncrementalSnaps){
+
+            return multiCmdList;
+        }
+
+        // Get the incremental snap values
+        Float xAxisSnapf = (Float) simpleTool.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.MOVEMENT_INCREMENTAL_X_AXIS_SNAP_PROP);
+
+        Float yAxisSnapf = (Float) simpleTool.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.MOVEMENT_INCREMENTAL_Y_AXIS_SNAP_PROP);
+
+        Float zAxisSnapf = (Float) simpleTool.getProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.MOVEMENT_INCREMENTAL_Z_AXIS_SNAP_PROP);
+
+        // Get the incremental snap special case values
+//      Float xAxisSpecialCaseSnapf = (Float) simpleTool.getProperty(
+//              Entity.DEFAULT_ENTITY_PROPERTIES,
+//              ChefX3DRuleProperties.MOVEMENT_INCREMENTAL_X_AXIS_SPECIAL_CASE_SNAP_PROP);
+
+//      Float yAxisSpecialCaseSnapf = (Float) simpleTool.getProperty(
+//              Entity.DEFAULT_ENTITY_PROPERTIES,
+//              ChefX3DRuleProperties.MOVEMENT_INCREMENTAL_Y_AXIS_SPECIAL_CASE_SNAP_PROP);
+
+//      Float zAxisSpecialCaseSnapf = (Float) simpleTool.getProperty(
+//              Entity.DEFAULT_ENTITY_PROPERTIES,
+//              ChefX3DRuleProperties.MOVEMENT_INCREMENTAL_Z_AXIS_SPECIAL_CASE_SNAP_PROP);
+
+        // Horizontal placement - adds products right to left
+        if(xAxisSnapf != null){
+
+            multiCmdList = createChildrenAlongSpan(
+                    SPAN_AXIS.XAXIS,
+                    xAxisSnapf,
+                    (BasePositionableEntity) parentEntity,
+                    parentEntityParentEntity,
+                    simpleTool,
+                    model);
+        }
+
+        // Vertical placement - adds products top to bottom
+        if(yAxisSnapf != null){
+
+            multiCmdList = createChildrenAlongSpan(
+                    SPAN_AXIS.YAXIS,
+                    yAxisSnapf,
+                    (BasePositionableEntity) parentEntity,
+                    parentEntityParentEntity,
+                    simpleTool,
+                    model);
+        }
+
+        // Depth placement - adds products front to back
+        if(zAxisSnapf != null){
+
+            multiCmdList = createChildrenAlongSpan(
+                    SPAN_AXIS.ZAXIS,
+                    zAxisSnapf,
+                    (BasePositionableEntity) parentEntity,
+                    parentEntityParentEntity,
+                    simpleTool,
+                    model);
+        }
+
+        return multiCmdList;
+    }
+*/
+    /**
+     * Create n products at the specified absolute positions
+     *
+     * @param axis SPAN_AXIS enum value
+     * @param absSnaps axis specific snap values
+     * @param parentEntity BasePositionableEntity parent to add children to
+     * @param parentEntityParentEntity Parent entity to parentEntity
+     * @param simpleTool SimpleTool to create children with
+     * @param model WorldModel to apply commands
+     * @return ArrayList<Command> list of add child commands
+     */
+    private ArrayList<Command> createNProducts(
+            SPAN_AXIS axis,
+            float[] absSnaps,
+            BasePositionableEntity parentEntity,
+            Entity parentEntityParentEntity,
+            SimpleTool simpleTool,
+            WorldModel model){
+
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        for(int i = 0; i < absSnaps.length; i++){
+
+            double[] childPos = new double[3];
+
+            switch(axis){
+                case XAXIS:
+                    childPos[0] = absSnaps[0];
+                    break;
+                case YAXIS:
+                    childPos[1] = absSnaps[0];
+                    break;
+                case ZAXIS:
+                    childPos[2] = absSnaps[0];
+                    break;
+            }
+
+            AddEntityChildCommand addCmd =
+                    issueNewAddChildCommand(
+                        model,
+                        parentEntity,
+                        parentEntityParentEntity,
+                        simpleTool,
+                        childPos,
+                        new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+                        true,
+                        false,
+                        null,
+                        ORIENTATION.DEFAULT);
+
+            if(addCmd != null){
+                multiCmdList.add(addCmd);
+            } // any alternates by virtue of the SKU3DRule ?
+        }
+
+        return multiCmdList;
+    }
+
+    /**
+     * Process each individual child along the specified span axis.
+     * Convert the old SPAN_AXIS enum to the more current ChefX3DRuleProperties
+     * TARGET_ADJUSTMENT_AXIS enum; this preserves the existing code
+     * should we ever wish to revert.
+     *
+     * @author Eric Fickenscher
+     *
+     * @param axis SPAN_AXIS enum value
+     * @param stepSize double step size
+     * @param parentEntity BasePositionableEntity parent to add children to
+     * @param parentEntityParentEntity Parent entity to parentEntity
+     * @param simpleTool SimpleTool to create children with
+     * @param model WorldModel to apply commands
+     * @param forceFit Flags force fitting of auto place products
+     * @return ArrayList<Command> list of add child commands
+     */
+    private ArrayList<Command> createChildrenAlongSpan(
+            SPAN_AXIS axis,
+            double stepSize,
+            BasePositionableEntity parentEntity,
+            Entity parentEntityParentEntity,
+            SimpleTool simpleTool,
+            WorldModel model,
+            boolean forceFit){
+
+        // auto initialize newAxis to XAXIS, overwrite if necessary
+        TARGET_ADJUSTMENT_AXIS newAxis = TARGET_ADJUSTMENT_AXIS.XAXIS;
+
+        if( axis == SPAN_AXIS.YAXIS)
+            newAxis = TARGET_ADJUSTMENT_AXIS.YAXIS;
+
+        else if( axis == SPAN_AXIS.ZAXIS)
+            newAxis = TARGET_ADJUSTMENT_AXIS.ZAXIS;
+
+        return createChildrenAlongSpan(
+                newAxis,
+                stepSize,
+                parentEntity,
+                parentEntityParentEntity,
+                simpleTool,
+                model,
+                forceFit);
+    }
+
+    /**
+     * Auto place children included in the AUTO_PLACE_OBJECT_TOOLS_PROP.
+     *
+     * @param model WorldModel
+     * @param parentEntity Parent to add children to
+     * @param parentEntityParentEntity Parent entity to parentEntity
+     * @return ArrayList<Command> add commands
+     */
+    private ArrayList<Command> addAutoEndPlacement(
+            WorldModel model,
+            Entity parentEntity,
+            Entity parentEntityParentEntity){
+
+        //
+        // EMF: These are the new properties added specifically for ticket #3.
+        //
+        // Ben writes:
+        //
+        // NOTE: THE KEY TO THIS WORKING IS THE ORDERING
+        // REQUIREMENT THAT ALL AUTO PLACE DATA SETS
+        // MATCH THE ORDER OF THE CX.autoPlObj DATA SET.
+        //
+        // To emphasize the point, CX.autoAddAxis, CX.autoAddNegOffset,
+        // CX.autoAddPosOffset and CX.autoAddStepSize are matched by
+        // index to the CX.autoPlObj listing.
+        //
+        String[] autoPlaceObjectsProp = (String[])
+            parentEntity.getProperty(Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.AUTO_PLACE_OBJECTS_PROP);
+
+        Enum[] autoAddAxis = (Enum[])
+            parentEntity.getProperty(Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.AUTO_ADD_AXIS);
+
+        float[] autoAddNegOffset = (float[])
+            parentEntity.getProperty(Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.AUTO_ADD_NEG_OFFSET);
+
+        float[] autoAddPosOffset = (float[])
+            parentEntity.getProperty(Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.AUTO_ADD_POS_OFFSET);
+
+        int[] autoAddEndPlacements = (int[])
+            parentEntity.getProperty(Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ChefX3DRuleProperties.AUTO_ADD_END_PLACEMENTS);
+
+        //
+        // defensive coding: check if we should break early
+        // in case the required properties are not set
+        //
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        if ((autoPlaceObjectsProp == null) ||
+            (autoAddAxis == null) ||
+            (autoAddPosOffset == null) ||
+            (autoAddNegOffset == null) ||
+            (autoAddEndPlacements == null)) {
+
+            return multiCmdList;
+        }
+
+        //
+        // Generate a command for each auto placement and add it to multiCmdList
+        //
+        for(int i = 0; i < autoPlaceObjectsProp.length; i++){
+
+            if (autoAddEndPlacements[i] == 0) {
+                continue;
+            }
+
+            SimpleTool simpleTool =
+                getSimpleToolByName(autoPlaceObjectsProp[i]);
+
+            ArrayList<Command> addCommands = createEnds(
+                (ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS)autoAddAxis[i],
+                autoAddPosOffset[i],
+                autoAddNegOffset[i],
+                (BasePositionableEntity) parentEntity,
+                parentEntityParentEntity,
+                simpleTool,
+                model);
+
+            //
+            // EMF: If a set of objects could not be placed,
+            // there will be nulls in the addCommands list.
+            //
+            // We DO want multiCmdList to contain null values if no
+            // addCommands could be issued (in order to trigger the
+            // error popupMessage).  But if there are successful add
+            // commands, then we want to remove all the null commands
+            // from the list.
+            //
+            // rem: ????????, C&P, not sure if it's right.
+            if(multiCmdList.contains(null)){
+                multiCmdList = addCommands;
+
+            } else if( !addCommands.contains(null)){
+                multiCmdList.addAll(addCommands);
+            }
+        }
+
+        return multiCmdList;
+    }
+
+    /**
+     * Create the ends - so that the means may be justified....
+     *
+     * @param axis SPAN_AXIS enum value
+     * @param posOffset The offset along the positive axis
+     * @param negOffset The offset along the negative axis
+     * @param parentEntity BasePositionableEntity parent to add children to
+     * @param parentEntityParentEntity Parent entity to parentEntity
+     * @param simpleTool SimpleTool to create children with
+     * @param model WorldModel to apply commands
+     * @return ArrayList<Command> list of add child commands
+     */
+    private ArrayList<Command> createEnds(
+            TARGET_ADJUSTMENT_AXIS axis,
+            float posOffset,
+            float negOffset,
+            BasePositionableEntity parentEntity,
+            Entity parentEntityParentEntity,
+            SimpleTool simpleTool,
+            WorldModel model){
+
+        ArrayList<Command> multiCmdList = new ArrayList<Command>();
+
+        float[] parentBounds = new float[6];
+        parentEntity.getBounds(parentBounds);
+
+        // end positions
+        double[] firstEndPos = new double[3];
+        double[] secondEndPos = new double[3];
+
+        switch(axis){
+        case XAXIS:
+            firstEndPos[0] = parentBounds[1] - posOffset;
+            secondEndPos[0] = parentBounds[0] + negOffset;
+            break;
+
+        case YAXIS:
+            firstEndPos[1] = parentBounds[3] - posOffset;
+            secondEndPos[1] = parentBounds[2] + negOffset;
+            break;
+
+        case ZAXIS:
+            firstEndPos[2] = parentBounds[5] - posOffset;
+            secondEndPos[2] = parentBounds[4] + negOffset;
+            break;
+        }
+
+        // Add first end (positive direction)
+        AddEntityChildCommand addCmd = issueNewAddChildCommand(
+            model,
+            parentEntity,
+            parentEntityParentEntity,
+            simpleTool,
+            firstEndPos,
+            new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+            true,
+            false,
+            axis,
+            ORIENTATION.POSITIVE);
+
+        multiCmdList.add(addCmd);
+
+        // Add second end (negative direction)
+        addCmd = issueNewAddChildCommand(
+            model,
+            parentEntity,
+            parentEntityParentEntity,
+            simpleTool,
+            secondEndPos,
+            new float[] {0.0f, 0.0f, 1.0f, 0.0f},
+            true,
+            false,
+            axis,
+            ORIENTATION.NEGATIVE);
+
+        multiCmdList.add(addCmd);
+
+        return(multiCmdList);
+    }
+}

@@ -1,0 +1,668 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.view.awt.av3d;
+
+//External imports
+import java.util.ArrayList;
+import java.util.HashSet;
+
+import javax.vecmath.Matrix4f;
+import javax.vecmath.Point3f;
+
+import org.j3d.device.input.TrackerState;
+
+//Internal imports
+import org.chefx3d.model.*;
+
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.util.IgnoreRuleList;
+import org.chefx3d.tool.DefaultEntityBuilder;
+import org.chefx3d.tool.EntityBuilder;
+import org.chefx3d.tool.SimpleTool;
+import org.chefx3d.tool.Tool;
+
+import org.chefx3d.util.ErrorReporter;
+
+/**
+ * Add the group of entities contained in a template.
+ *
+ * @author Rex Melton
+ * @version $Revision: 1.21 $
+ */
+public class AddTemplateEntityResponse
+    implements
+        TrackerEventResponse,
+        CommandListener {
+
+    /** Reference to world model */
+    private WorldModel model;
+
+    /** The controlleer to send commands to */
+    private CommandController controller;
+
+    /** Reference to error reporter */
+    private ErrorReporter reporter;
+
+    /** Reference to entity builder */
+    private EntityBuilder entityBuilder;
+
+    /** List of entities in a parented hierarchy */
+    private ArrayList<Entity> entityList;
+
+    /** The initial conditions for this action */
+    private ActionData actionData;
+
+    /** Instance of hierarchy transformation calculator */
+    private TransformUtils tu;
+
+    /** Scratch vecmath objects */
+    private Matrix4f mtx1;
+    private Matrix4f mtx;
+    private Point3f pnt;
+
+    /** Multi-Command list */
+    private ArrayList<Command> cmdList;
+    private ArrayList<Command> selectList;
+
+    /** The currently processing command */
+    private Command processCommand;
+
+    /** The number of products processed so far */
+    private int count;
+
+    private HashSet<String> ignoreRuleList;
+
+    /**
+     * Constructor
+     *
+     * @param model
+     * @param controller
+     * @param reporter
+     */
+    public AddTemplateEntityResponse(
+            WorldModel model,
+            CommandController controller,
+            ErrorReporter reporter) {
+
+        this.model = model;
+        this.controller = controller;
+        this.reporter = reporter;
+        entityBuilder = DefaultEntityBuilder.getEntityBuilder();
+
+        controller.addCommandHistoryListener(this);
+
+        tu = new TransformUtils();
+        mtx1 = new Matrix4f();
+        mtx = new Matrix4f();
+        pnt = new Point3f();
+
+        entityList = new ArrayList<Entity>();
+        cmdList = new ArrayList<Command>();
+        selectList = new ArrayList<Command>();
+
+        // create the ignore rule list
+        ignoreRuleList = IgnoreRuleList.getIgnoreTemplateRuleList();
+
+    }
+
+    //---------------------------------------------------------------
+    // Methods defined by TrackerEventResponse
+    //---------------------------------------------------------------
+
+    /**
+     * Begins the processing required to generate a command in response
+     * to the input received.
+     *
+     * @param trackerID The id of the tracker calling the original handler
+     * @param trackerState The event that started this whole thing off
+     * @param entities The array of entities to handle
+     * @param tool The tool that is used in the action (can be null)
+     */
+    public void doEventResponse(
+            int trackerID,
+            TrackerState trackerState,
+            Entity[] entities,
+            Tool tool) {
+
+        // flush the list from previous requests
+        cmdList.clear();
+
+        double[] position =
+            (double[])tool.getProperty(
+                    Entity.DEFAULT_ENTITY_PROPERTIES,
+                    PositionableEntity.POSITION_PROP);
+
+        float[] rotation =
+            (float[])tool.getProperty(
+                    Entity.DEFAULT_ENTITY_PROPERTIES,
+                    PositionableEntity.ROTATION_PROP);
+
+        if (position == null) {
+            position = new double[]{0, 0, 0};
+        }
+
+        if (rotation == null) {
+            rotation = new float[]{0, 1, 0, 0};
+        }
+
+        // a new entity, a new identity,
+        // a service of the entity relocation program
+        int templateEntityID = model.issueEntityID();
+
+        // create the entity
+        Entity newEntity = entityBuilder.createEntity(
+            model,
+            templateEntityID,
+            position,
+            rotation,
+            tool);
+
+System.out.println("tool: " + tool);
+System.out.println("newEntity for: " + templateEntityID + " entity: " + newEntity);
+        // if there is something to relo....
+        if ((newEntity != null) &&
+                (newEntity instanceof TemplateEntity) &&
+                newEntity.hasChildren()) {
+
+            Entity zoneEntity = actionData.zoneWrapper.entity;
+
+            TemplateEntity template = (TemplateEntity)newEntity;
+
+            // need to cast the template to a basic entity
+            // before we add it to the scene
+            //boolean isKit = false;
+            if (template.getCategory().equals("Category.Kit")) {
+                createKitEntity(templateEntityID, template, zoneEntity);
+                markEntitiesAsKit(template, templateEntityID, true);
+            } else if (template.getCategory().equals("Category.Template")) {
+                createTemplateEntity(templateEntityID, template, zoneEntity);
+                markEntitiesAsTemplate(template, templateEntityID);
+            }
+
+            // clear out the 'bogus' property
+            setShadowState(newEntity, false);
+            setShadowState(template, false);
+
+            // assemble the list of entities in the hierarchy
+            entityList.clear();
+            initEntities(template);
+
+            // the center of the template
+            double[] center = new double[3];
+            template.getPosition(center);
+
+            // get the bounds of the template
+            float[] bounds = new float[6];
+            template.getBounds(bounds);
+
+            // zone to world transform
+            tu.getLocalToVworld(
+                actionData.zoneWrapper.transformGroup,
+                mtx);
+
+            ArrayList<Entity> children = template.getChildren();
+            int num_children = children.size();
+System.out.println("children: " + num_children);
+            for (int i = 0; i < num_children; i++) {
+
+                PositionableEntity pe = (PositionableEntity)children.get(i);
+
+                // Handle updating the position
+                pe.getPosition(position);
+
+                // what will the new parent be, default in the current zone
+                Entity newParent = zoneEntity;
+
+                // This exists in case the child is another kit or template
+                // rarely is this going to be the case
+                if (pe.getCategory().equals("Category.Kit")) {
+                    int kitEntityID = pe.getEntityID();
+                    markEntitiesAsKit(template, kitEntityID, false);
+                } else if (pe.getCategory().equals("Category.Template")) {
+                    markEntitiesAsTemplate(template, templateEntityID);
+                } else {
+
+                    // Get the delta position we side pocket in a little bit
+                    double[] delta = new double[3];
+                    pe.getPosition(delta);
+
+                    position[0] += center[0];
+                    position[1] += center[1];
+                    position[2] += center[2];
+
+                    pnt.x = (float)position[0];
+                    pnt.y = (float)position[1];
+                    pnt.z = (float)position[2];
+                    mtx.transform(pnt);
+
+System.out.println("pos: " + java.util.Arrays.toString(position) + " to: " + pnt);
+
+                    trackerState.worldPos[0] = pnt.x;
+                    trackerState.worldPos[1] = pnt.y;
+                    trackerState.worldPos[2] = pnt.z;
+
+                    actionData.pickManager.doPick(trackerState);
+
+                    // determine the new parent. if the mouse is not over an entity,
+                    // this will be null
+                    PickData pd = null;
+                    ArrayList<PickData> pickList = actionData.pickManager.getResults();
+                    for (int j = 0; j < pickList.size(); j++) {
+                        // find the closest object associated with an entity
+                        // that is NOT the zone entity and is not a part of
+                        // the entity hierarchy that is being transformed
+                        PickData tpd = pickList.get(j);
+                        if ((tpd.object instanceof Entity) &&
+                            !(entityList.contains(tpd.object)) &&
+                            !(tpd.object == pe)) {
+                            if (pd != zoneEntity) {
+                                pd = tpd;
+                                newParent = (Entity)pd.object;
+                            }
+                            break;
+                        }
+                    }
+
+//                  if (newParent == null) {
+//                      // the mouse is not over an entity, parent to the zone
+//                      newParent = zoneEntity;
+//                  }
+
+                    if (newParent != zoneEntity) {
+System.out.println("Not to zone?");
+                        int parentID = newParent.getEntityID();
+                        AV3DEntityWrapper parentWrapper = actionData.wrapperMap.get(parentID);
+
+                        pnt.x = (float)position[0];
+                        pnt.y = (float)position[1];
+                        pnt.z = (float)position[2];
+
+                        tu.getLocalToVworld(
+                            parentWrapper.transformGroup,
+                            actionData.zoneWrapper.transformGroup,
+                            mtx1);
+                        mtx1.invert();
+                        mtx1.transform(pnt);
+
+                        position[0] = pnt.x;
+                        position[1] = pnt.y;
+                        position[2] = pnt.z;
+
+                    }
+
+                    pe.setPosition(position, false);
+                    pe.setStartingPosition(position);
+
+                    // Pack in the kit/template center, bounds, entity delta from
+                    // center and the kit/template properties. This is so rules
+                    // can quickly reference data about the kit/template they
+                    // belong to.
+                    pe.setProperty(
+                            Entity.DEFAULT_ENTITY_PROPERTIES,
+                            TemplateEntity.TEMPLATE_BOUNDS,
+                            bounds,
+                            false);
+
+                    pe.setProperty(
+                            Entity.DEFAULT_ENTITY_PROPERTIES,
+                            TemplateEntity.TEMPLATE_PROPERTIES,
+                            template.getPropertiesMap(),
+                            false);
+
+                    pe.setProperty(
+                            Entity.DEFAULT_ENTITY_PROPERTIES,
+                            TemplateEntity.TEMPLATE_ENTITY_DELTA_POSITION,
+                            delta,
+                            false);
+
+                }
+
+                // Issue the add command
+                AddEntityChildCommand cmd =
+                    new AddEntityChildCommand(model, newParent, pe, false);
+                cmd.setGroupingID(templateEntityID);
+                cmd.setIgnoreRuleList(ignoreRuleList);
+                cmd.setErrorReporter(reporter);
+                cmdList.add(cmd);
+
+            }
+
+            // If there is something to add do it!
+            if (cmdList.size() > 0) {
+
+                count = 0;
+
+                processCommand = cmdList.get(count++);
+                controller.execute(processCommand);
+
+            }
+        }
+    }
+
+    //----------------------------------------------------------
+    // Methods defined by CommandListener
+    //----------------------------------------------------------
+
+    /**
+     * A command was successfully executed
+     *
+     * @param cmd The command
+     */
+    public void commandExecuted(Command cmd) {
+        processNextCommand(cmd);
+    }
+
+    /**
+     * A command was not successfully executed
+     *
+     * @param cmd The command
+     */
+    public void commandFailed(Command cmd){
+        processNextCommand(cmd);
+    }
+
+    /**
+     * A command was successfully undone
+     *
+     * @param cmd The command
+     */
+    public void commandUndone(Command cmd) {
+
+    }
+
+    /**
+     * A command was successfully redone
+     *
+     * @param cmd The command
+     */
+    public void commandRedone(Command cmd) {
+
+    }
+
+    /**
+     * The command stack was cleared
+     */
+    public void commandCleared() {
+
+    }
+
+    //---------------------------------------------------------------
+    // Local Methods
+    //---------------------------------------------------------------
+
+    /**
+     * Initialize in preparation for a response
+     *
+     * @param ad The initial device position of the mouse
+     */
+    void setActionData(ActionData ad) {
+        actionData = ad;
+    }
+
+    /**
+     * Sets the correct entity builder to use
+     * @param builder
+     */
+    public void setEntityBuilder(EntityBuilder builder){
+        entityBuilder = builder;
+    }
+
+    /**
+     * Initialize the list of entities in a hierarchy
+     */
+    void initEntities(Entity entity) {
+        entityList.add(entity);
+        if (entity.hasChildren()) {
+            ArrayList<Entity> children = entity.getChildren();
+            for (int i = 0; i < children.size(); i++) {
+                Entity child = children.get(i);
+                initEntities(child);
+            }
+        }
+    }
+
+    /**
+     * Initialize the list of entities in a hierarchy as
+     * a group/kit by setting the kitEntityID.
+     */
+    void markEntitiesAsKit(Entity entity, int kitEntityID, boolean flag) {
+
+        if (flag)
+            entity.setKitEntityID(kitEntityID);
+        else
+            if (entity.getKitEntityID() != -1)
+                entity.setKitEntityID(kitEntityID);
+
+        if (entity.hasChildren()) {
+            ArrayList<Entity> children = entity.getChildren();
+            for (int i = 0; i < children.size(); i++) {
+                Entity child = children.get(i);
+                markEntitiesAsKit(child, kitEntityID, flag);
+            }
+        }
+    }
+
+    /**
+     * Initialize the list of entities in a hierarchy as
+     * a group/template by setting the templateEntityID.
+     */
+    void markEntitiesAsTemplate(Entity entity, int templateEntityID) {
+
+        entity.setTemplateEntityID(templateEntityID);
+
+        if (entity.hasChildren()) {
+            ArrayList<Entity> children = entity.getChildren();
+            for (int i = 0; i < children.size(); i++) {
+                Entity child = children.get(i);
+                markEntitiesAsTemplate(child, templateEntityID);
+            }
+        }
+    }
+
+    /**
+     * Set the bogus shadow property
+     */
+    void setShadowState(Entity entity, boolean state) {
+        entity.setProperty(
+            entity.getParamSheetName(),
+            Entity.SHADOW_ENTITY_FLAG,
+            state,
+            false);
+        if (entity.hasChildren()) {
+            ArrayList<Entity> children = entity.getChildren();
+            for (int i = 0; i < children.size(); i++) {
+                Entity child = children.get(i);
+                setShadowState(child, state);
+            }
+        }
+    }
+
+    /**
+     * Process the next command in the list
+     *
+     * @param cmd The previous command just completed
+     */
+    private void processNextCommand(Command cmd) {
+
+        if (processCommand == cmd) {
+
+            // get the next command
+            if (count < cmdList.size()) {
+
+                processCommand = cmdList.get(count);
+                controller.execute(processCommand);
+
+            }
+
+            count++;
+
+        }
+
+    }
+
+    /**
+     * Create the kit and add it to the scene
+     *
+     * @param kitEntityID ID of the kit to use
+     * @param template Template entity to add
+     * @param parent Parent to add the template to
+     */
+    private void createKitEntity(
+            int kitEntityID,
+            Entity template,
+            Entity parent) {
+
+        // create the product tool
+        SimpleTool templateTool = new SimpleTool(
+                template.getToolID(),
+                template.getName(),
+                template.getIconURL(null),
+                null,
+                template.getType(),
+                null,
+                template.getDescription(),
+                new float[] {0.000001f, 0.000001f, 0.000001f},
+                new float[] {0.000001f, 0.000001f, 0.000001f},
+                MultiplicityConstraint.NO_REQUIREMENT,
+                template.getCategory(),
+                false,
+                false,
+                false,
+                false,
+                template.getPropertiesMap());
+
+        double[] position = new double[] {0.0, -200.0, 0.0};
+        float[] rotation = new float[] {0, 0, 1, 0};
+
+        // create the entity way off in space
+        Entity newEntity = entityBuilder.createEntity(
+            model,
+            kitEntityID,
+            position,
+            rotation,
+            templateTool);
+
+        // Correct the relationship values so it can be placed correctly
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP,
+                new String[] {"empty"},
+                false);
+
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP,
+                new int[] {0},
+                false);
+
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP,
+                new Enum[] {ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES.EQUAL_TO},
+                false);
+
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.MOVEMENT_RESTRICTED_TO_BOUNDARY,
+                false,
+                false);
+
+        // add template container to the zone
+        AddEntityChildCommand cmd =
+            new AddEntityChildCommand(model, parent, newEntity, false);
+        cmd.setIgnoreRuleList(ignoreRuleList);
+        cmd.setErrorReporter(reporter);
+        cmd.setGroupingID(kitEntityID);
+        cmdList.add(cmd);
+
+    }
+
+    /**
+     * Create the template and add it to the scene
+     *
+     * @param templateEntityID ID of the template to use
+     * @param template Template entity to add
+     * @param parent Parent to add template to
+     */
+    private void createTemplateEntity(
+            int templateEntityID,
+            Entity template,
+            Entity parent) {
+
+        // create the product tool
+        SimpleTool templateTool = new SimpleTool(
+                template.getToolID(),
+                template.getName(),
+                template.getIconURL(null),
+                null,
+                template.getType(),
+                null,
+                template.getDescription(),
+                new float[] {0.000001f, 0.000001f, 0.000001f},
+                new float[] {0.000001f, 0.000001f, 0.000001f},
+                MultiplicityConstraint.NO_REQUIREMENT,
+                template.getCategory(),
+                false,
+                false,
+                false,
+                false,
+                template.getPropertiesMap());
+
+        double[] position = new double[] {0.0, -200.0, 0.0};
+        float[] rotation = new float[] {0, 0, 1, 0};
+
+        // create the entity way off in space
+        Entity newEntity = entityBuilder.createEntity(
+            model,
+            templateEntityID,
+            position,
+            rotation,
+            templateTool);
+
+System.out.println("Template? " + newEntity);
+
+        // Correct the relationship values so it can be placed correctly
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.RELATIONSHIP_CLASSIFICATION_PROP,
+                new String[] {"empty"},
+                false);
+
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.RELATIONSHIP_AMOUNT_PROP,
+                new int[] {0},
+                false);
+
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_PROP,
+                new Enum[] {ChefX3DRuleProperties.RELATIONSHIP_MODIFIER_VALUES.EQUAL_TO},
+                false);
+
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.MOVEMENT_RESTRICTED_TO_BOUNDARY,
+                false,
+                false);
+
+
+        // add template container to the zone
+        Command cmd =
+            new AddEntityChildCommand(model, parent, newEntity, false);
+        cmd.setIgnoreRuleList(ignoreRuleList);
+        cmd.setErrorReporter(reporter);
+        cmdList.add(cmd);
+
+    }
+}

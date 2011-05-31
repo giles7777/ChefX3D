@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- JNLP File for the uDesign Application -->
+
+<jnlp spec="1.5+" codebase="http://dev.yumetech.com/~russell/chefx3d/"> 
+	<information>
+		<title>ChefX3D Simple Example</title>    
+		<vendor>Yumetech, Inc.</vendor>    
+		<homepage href="http://www.yumetech.com/"/>    
+		<description>ChefX3D Simple Example</description>    
+	    <offline-allowed/>     
+	    <shortcut online="false">      
+	    	<menu submenu="Yumetech Applications"/>    
+	    </shortcut>  
+   	</information>  
+   	<security>      
+   		<all-permissions/>  
+   	</security>  
+   	<resources>    
+ 		<j2se version="1.5+" java-vm-args="-Xmx512M -XX:MaxDirectMemorySize=256M -Dsun.java2d.noddraw=true" href="http://java.sun.com/products/autodl/j2se" />   		
+   		<jar href="lib/chefx3d_demos_3.0.0.jar" />  
+   		<jar href="lib/chefx3d_tools_3.0.0.jar" />  
+   		<jar href="lib/chefx3d_all_3.0.0.jar" />     		
+    		<jar href="lib/xj3d-all_2.0.0.jar" />   
+    		<jar href="lib/xj3d-common_2.0.0.jar" />   
+    		<jar href="lib/xj3d-config_2.0.0.jar" />   
+    		<jar href="lib/xj3d-core_2.0.0.jar" />   
+    		<jar href="lib/xj3d-device_2.0.0.jar" />   
+    		<jar href="lib/xj3d-eai_2.0.0.jar" />   
+    		<jar href="lib/xj3d-ecmascript_2.0.0.jar" />   
+    		<jar href="lib/xj3d-external-sai_2.0.0.jar" />   
+    		<jar href="lib/xj3d-external-sai-concrete_2.0.0.jar" />   
+    		<jar href="lib/xj3d-images_2.0.0.jar" />   
+    		<jar href="lib/xj3d-java-sai_2.0.0.jar" />   
+    		<jar href="lib/xj3d-java-sai-concrete_2.0.0.jar" />   
+    		<jar href="lib/xj3d-jaxp_2.0.0.jar" />   
+    		<jar href="lib/xj3d-jsai_2.0.0.jar" />   
+    		<jar href="lib/xj3d-net_2.0.0.jar" />   
+    		<jar href="lib/xj3d-norender_2.0.0.jar" />   
+    		<jar href="lib/xj3d-ogl_2.0.0.jar" />   
+    		<jar href="lib/xj3d-parser_2.0.0.jar" />   
+    		<jar href="lib/xj3d-render_2.0.0.jar" />   
+    		<jar href="lib/xj3d-runtime_2.0.0.jar" />   
+    		<jar href="lib/xj3d-sai_2.0.0.jar" />   
+    		<jar href="lib/xj3d-sai-concrete_2.0.0.jar" />   
+    		<jar href="lib/xj3d-sav_2.0.0.jar" />   
+    		<jar href="lib/xj3d-script-base_2.0.0.jar" />   
+    		<jar href="lib/xj3d-xml_2.0.0.jar" />   
+    		<jar href="lib/xj3d-xml-util_2.0.0.jar" />   		
+    		<jar href="lib/FastInfoset.jar" />   
+    		<jar href="lib/gnu-regexp-1.0.8.jar" />   
+    		<jar href="lib/jinput.jar" />   
+    		<jar href="lib/odejava.jar" />   
+  		<jar href="lib/uri.jar" />  
+   		<jar href="lib/j3d-org-all_0.9.0.jar" />  
+   		<jar href="lib/js.jar" />  
+   		<jar href="lib/httpclient.jar" />  
+   		<jar href="lib/aviatrix3d-all_2.1.0.jar" />     		
+   		<jar href="lib/gt2-api-2.4.4.jar" />  
+   		<jar href="lib/gt2-coverage-2.4.4.jar" />  
+   		<jar href="lib/gt2-image-2.4.4.jar" />  
+   		<jar href="lib/gt2-imagemosaic-2.4.4.jar" />  
+   		<jar href="lib/gt2-imagepyramid-2.4.4.jar" />  
+   		<jar href="lib/gt2-metadata-2.4.4.jar" />  
+   		<jar href="lib/gt2-main-2.4.4.jar" />  
+   		<jar href="lib/gt2-referencing-2.4.4.jar" />  
+   		<jar href="lib/gt2-render-2.4.4.jar" />  
+   		<jar href="lib/geoapi-nogenerics-2.1.0.jar" />     		
+   		<jar href="lib/vecmath.jar" />
+   		<jar href="lib/jts-1.8.jar" />
+   		<jar href="lib/jsr108-0.01.jar" />  
+   		<jar href="lib/jai_codec.jar" />    		
+   		<jar href="lib/jai_core.jar" />
+   		<jar href="lib/jai_imageio.jar" />
+   		<jar href="lib/joal.jar" />
+   		<jar href="lib/l2fprod-common-outlookbar.jar" />   		
+   	</resources>
+   	<resources>
+		<extension name="jogl" href="http://download.java.net/media/jogl/builds/archive/jsr-231-webstart-current/jogl.jnlp" />
+	</resources>	   	  	   	  
+   	<application-desc main-class="demos.SimpleExample">
+		<!--<argument>modelID=-3</argument>-->
+	</application-desc>
+</jnlp> 

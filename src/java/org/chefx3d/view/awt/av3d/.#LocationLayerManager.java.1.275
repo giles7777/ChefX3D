@@ -1,0 +1,3052 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.view.awt.av3d;
+
+// External imports
+import java.awt.Color;
+
+import java.awt.event.MouseEvent;
+import java.awt.event.MouseListener;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Set;
+
+import javax.vecmath.*;
+
+import org.j3d.aviatrix3d.*;
+
+import org.j3d.device.input.TrackerState;
+
+import org.j3d.util.I18nManager;
+
+// Local Imports
+import org.chefx3d.model.*;
+
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+
+import org.chefx3d.tool.EntityBuilder;
+import org.chefx3d.tool.DefaultEntityBuilder;
+import org.chefx3d.tool.SegmentTool;
+import org.chefx3d.tool.SegmentableTool;
+import org.chefx3d.tool.Tool;
+
+import org.chefx3d.toolbar.ToolBarManager;
+
+import org.chefx3d.ui.LoadingProgressListener;
+import org.chefx3d.ui.PopUpConfirm;
+
+import org.chefx3d.util.ErrorReporter;
+
+import org.chefx3d.view.ViewManager;
+
+import org.chefx3d.view.awt.av3d.AV3DConstants.NavigationMode;
+import org.chefx3d.view.awt.scenemanager.DeviceManager;
+import org.chefx3d.view.awt.scenemanager.PerFrameObserver;
+import org.chefx3d.view.awt.scenemanager.PerFrameUIObserver;
+import org.chefx3d.view.awt.scenemanager.SceneManagerObserver;
+import org.chefx3d.view.awt.scenemanager.ResizeListener;
+import org.chefx3d.view.awt.scenemanager.UserInputHandler;
+
+/**
+ * Implementation of the location LayerManager
+ *
+ * @author Rex Melton
+ * @version $Revision: 1.275 $
+ */
+class LocationLayerManager extends AbstractLayerManager
+    implements
+        ModelListener,
+        NodeUpdateListener,
+        UserInputHandler,
+        PerFrameObserver,
+        EntityPropertyListener,
+        EntityChildListener,
+        EntitySelectionListener,
+        AV3DConstants,
+        PerFrameUIObserver,
+        ResizeListener,
+        MouseListener {
+
+    /** How far should we zoom? */
+    public static final float ZOOM_AMOUNT = 0.2f;
+
+    /** Default background color */
+    private static final float[] DEFAULT_BACKGROUND_COLOR = new float[]{0, 0, 0};
+
+    /** Default background color */
+    private static final int FRAMES_BEFORE_HOVER_OCCURS = 10;
+
+    /** Confirmation pop up message */
+    private static final String CONFIRM_MSG =
+        "org.chefx3d.view.awt.av3d.LocationLayerManager.confirmSplit";
+
+    /** Default name of the lighting file to go read */
+    private static final String DEFAULT_LIGHTING_FILE =
+        "config/view/av3d/editor_lighting.xml";
+
+    /** The scene manager Observer*/
+    private SceneManagerObserver mgmtObserver;
+
+    /** Translation utility */
+    private I18nManager intlMgr;
+
+    /** The device manager */
+    private DeviceManager deviceManager;
+
+    /** The navigation status manager */
+    private NavigationStatusManager navStatusManager;
+
+    /** The world model */
+    protected WorldModel model;
+
+    /** List of commands that have been buffered */
+    protected CommandController controller;
+
+    /** The current tool */
+    protected Tool currentTool;
+
+    /** Utility class to construct entities from tools */
+    protected EntityBuilder entityBuilder;
+
+    /** Collision detector for rules checking */
+    private EntityCollisionManager collisionManager;
+
+    /** Selection box and anchor manager */
+    private SelectionLayerManager selectionManager;
+
+    /** Container of editor state variables */
+    private LocationEditorState editorState;
+
+    /** Flag indicating that the background should be reconfigured */
+    private boolean configBackground;
+
+    /** Background node*/
+    private ColorBackground background;
+
+    /** Array used for setting up the background color*/
+    private float backgroundColorArray[];
+
+    /** What is the active button */
+    private int activeButton;
+
+    /** What is the active button modifier */
+    private int activeButtonModifier;
+
+    /** Used to keep track of how many frames the mouse has remained unmoved*/
+    private int frameCount;
+
+    /** The NavigationManager */
+    private DefaultNavigationManager navManager;
+
+    /** The PickManager */
+    private PickManager pickManager;
+
+    /** Are we in a transient command */
+    private boolean inTransient;
+
+    /** The current transactionID for transient commands.  Assume only one can be active. */
+    private int transactionID;
+
+    /** The mouse posisition, used for the ghost segments
+     *  so that they do not start at 0,0,0*/
+    private double[] shadowSegmentMousePosition;
+
+    /** The cursor manager */
+    private AV3DCursorManager cursorManager;
+
+    private int mouseWheelClick;
+
+    /** Flag indicating that the user has requested a viewpoint reset */
+    private boolean doNavigationReset;
+
+    /** The scene entity */
+    private SceneEntity sceneEntity;
+
+    /** Location Entitys, key'ed by Entity ID */
+    private HashMap<Integer, LocationEntity> locationEntityMap;
+
+    /** Location Group nodes, key'ed by Entity ID */
+    private HashMap<Integer, Group> locationGroupMap;
+
+    /** Location AV3DEntityManagers, key'ed by Entity ID */
+    private HashMap<Integer, AV3DEntityManager> locationManagerMap;
+
+    /** The active location Entity */
+    private LocationEntity activeLocationEntity;
+
+    /** The active location AV3DEntityManager */
+    private AV3DEntityManager activeEntityManager;
+
+    /** Map of entity wrappers from the activeEntityManager */
+     private HashMap<Integer, AV3DEntityWrapper> wrapperMap;
+
+    /** The active zone Entity */
+    private ZoneEntity activeZoneEntity;
+
+    /** The active zone's inverse transform matrix */
+    private Matrix4f invZoneMtx;
+
+    /** The current mouse position relative to the zone */
+    private Point3f zoneRelativeMousePosition;
+
+    /** The active location Group */
+    private Group activeLocationGroup;
+
+    /** The visibility handler */
+    private LocationVisibilityHandler visHandler;
+
+    /** The entity that the mouse is currently over */
+    private Entity mouseOverEntity;
+
+    /** Array list of nodes to add to the scene */
+    private ArrayList<Node> nodeAddList;
+
+    /** Array list of nodes to remove from the scene */
+    private ArrayList<Node> nodeRemoveList;
+
+    /** Helper class for configuring view based on the editing zone */
+    private ZoneView zoneView;
+
+    /** The filter to use for url requests, null use baseURL logic instead */
+    private URLFilter urlFilter;
+
+    /** The selected entity state at the last mouse press */
+    private ActionData initialActionData;
+
+    /** flag indicating that a drag operation has been initialized */
+    private boolean dragInProgress;
+
+    /** Flag indicating that a press operation has been processed this frame */
+    private boolean pressProcessed;
+
+    /** Flag indicating that a release operation has been processed this frame */
+    private boolean releaseProcessed;
+
+    /** The shadow entity, precursor to an actual live entity in the scene */
+    private PositionableEntity shadowEntity;
+
+    /** The shadow entity, precursor to an actual live entity in the scene */
+    private boolean shadowEntityWasVertex;
+
+    private double[] shadowEntityLastPosition;
+
+    private int shadowSegmentStartVertexID;
+
+    private int shadowVertexEntityID;
+
+    /** The shadow segment entity, precursor to an actual live segment entity in the scene */
+    private SegmentEntity shadowSegmentEntity;
+
+    /** Flag indicating that the pointing device is over the graphics surface */
+    private boolean trackerIsOver;
+
+    /** Flag indicating that the shadow geometry is active in the scene */
+    private boolean shadowMoveInProgress;
+
+    /** Flag indicating that the shadow geometry is visible in the scene */
+    private boolean shadowIsVisible;
+
+    /** The list of all entities in the scene */
+    private HashMap<Integer, Entity> entityMap;
+
+    /** A helper class to handle selection easier */
+    private EntitySelectionHelper selectionHelper;
+
+    /** The set of selectable entity categories */
+    private Set<String> categorySet;
+
+    private boolean newWall;
+
+    /** Scratch vecmath objects */
+    private Matrix4f mtx;
+    private Point3f pnt;
+
+    /** Instance of hierarchy transformation calculator */
+    private TransformUtils tu;
+
+    /** Displays a pop up confirm message */
+    private PopUpConfirm popUpConfirm = PopUpConfirm.getInstance();
+
+    //-----------------------------------------------------
+    // Event responders
+    //-----------------------------------------------------
+
+    /** Handles final move events for default entities */
+    private EntityMoveResponse entityMoveResponse;
+
+    /** Handles transient move events for default entities */
+    private EntityMoveTransientResponse entityMoveTransientResponse;
+
+    /** Handles add entity events */
+    private AddEntityResponse addEntityResponse;
+
+    /** Handles add segmentable entity events */
+    private AddSegmentableEntityResponse addSegmentableEntityResponse;
+
+    /** Handles add vertex to segmentable entity events */
+    private AddVertexEntityResponse addVertexEntityResponse;
+
+    /** Handles add auto span entity events */
+    private AddAutoSpanEntityResponse addAutoSpanEntityResponse;
+
+    /** Handles final move events for default entities */
+    private ModelTransitionResponse modelTransitionResponse;
+
+    /** Handles transient move events for default entities */
+    private ModelTransitionTransientResponse modelTransitionTransientResponse;
+
+    /** Handles add template entity events */
+    private AddTemplateEntityResponse addTemplateEntityResponse;
+
+    /** Handles transient move events for default entities */
+    private ModelMoveTransientResponse modelMoveTransientResponse;
+
+    /////////////////////////////////////////////////////////////////////////////
+    // variables for resizing
+
+    /** Has the view frustum been created yet */
+    private boolean initialViewFrustumSet;
+
+    private boolean splitSegment;
+
+    /** the last-resized width */
+    private int oldPixelWidth;
+
+    /** the last-resized height */
+    private int oldPixelHeight;
+
+    /** array of length six to hold the view frustum */
+    double[] viewFrustum;
+
+    /** A progress bar notification */
+    private LoadingProgressListener progressListener;
+
+    /** variables to set and unset zoom mode */
+    private NavigationMode currentNavMode, previousNavMode;
+
+    /** are we zooming in or out? */
+    private int zoom;
+
+    /** controller to reset zoom mode on and off */
+    private NavigationModeController currentNavController;
+
+    /** Special trackerState to handle zooming */
+    private TrackerState trackerState;
+
+    /** How many zooms need processing? */
+    private int moveCount;
+
+    /**
+     * Constructor
+     *
+     * @param id The layer id
+     * @param dim The initial viewport dimensions in [x, y, width, height]
+     * @param view_id Identifier of the view this is in
+     * @param worldModel The WorldModel
+     * @param commandController The CommandController
+     * @param reporter The ErrorReporter instance to use or null
+     * @param mgmtObserver The SceneManagerObserver
+     * @param deviceMngr The DeviceManager
+     * @param cursorMngr The CursorManager
+     * @param navStatusMngr The NavigationStatusManager
+     * @param urlField The urlFilter to use for resource loading
+     */
+    LocationLayerManager(
+        int id,
+        int[] dim,
+        String view_id,
+        WorldModel worldModel,
+        CommandController commandController,
+        ErrorReporter reporter,
+        SceneManagerObserver sceneMgmtObserver,
+        DeviceManager deviceMngr,
+        AV3DCursorManager cursorMngr,
+        NavigationStatusManager navStatusMngr,
+        URLFilter url_filter,
+        LoadingProgressListener loadingProgressListener) {
+
+        super(id, dim);
+
+        intlMgr = I18nManager.getManager();
+
+        setErrorReporter(reporter);
+
+        selectionHelper =
+            EntitySelectionHelper.getEntitySelectionHelper();
+
+        model = worldModel;
+        controller = commandController;
+        deviceManager = deviceMngr;
+        cursorManager = cursorMngr;
+        navStatusManager = navStatusMngr;
+        urlFilter = url_filter;
+        progressListener = loadingProgressListener;
+        mgmtObserver = sceneMgmtObserver;
+        mgmtObserver.addObserver(this);
+        //mgmtObserver.addUIObserver(this);
+
+        ////////////////////////////////////////////////////////////////
+        // scene objects managed by this
+
+        background = new ColorBackground(DEFAULT_BACKGROUND_COLOR);
+        scene.setActiveBackground(background);
+        rootGroup.addChild(background);
+
+        LightConfig lc = new LightConfig(
+            DEFAULT_LIGHTING_FILE,
+            errorReporter);
+
+        if (lc.isEnabled() && lc.isConfigured()) {
+            SwitchGroup lightSwitch = lc.getSwitchGroup();
+            rootGroup.addChild(lightSwitch);
+        } else {
+            // just use ambient light for lighting
+            viewpoint.setGlobalAmbientLightEnabled(true);
+            viewpoint.setGlobalAmbientColor(new float[] {0.9f, 0.9f, 0.9f});
+        }
+        ////////////////////////////////////////////////////////////////
+        // variables for resizing
+        initialViewFrustumSet = false;
+        viewFrustum = new double[6];
+
+        ////////////////////////////////////////////////////////////////
+        // hierarchy transformation objects
+        tu = new TransformUtils();
+        mtx = new Matrix4f();
+        pnt = new Point3f();
+        invZoneMtx = new Matrix4f();
+        zoneRelativeMousePosition = new Point3f();
+
+        ////////////////////////////////////////////////////////////////
+        // managers and handlers
+        visHandler = new LocationVisibilityHandler(mgmtObserver);
+
+        NavigationCollisionManager nc =
+            new SimpleNavigationCollisionManager(rootGroup, 0.1f);
+
+        // any configuration of the layer viewpoint transform group
+        // should occur -before- instantiating the nav manager
+
+        navManager = new DefaultNavigationManager(
+            view_id,
+            model,
+            controller,
+            errorReporter,
+            this,
+            rootGroup,
+            null,
+            mgmtObserver,
+            nc,
+            navStatusManager);
+        navManager.setNavigationMode(NavigationMode.PANZOOM);
+
+        // configure the border increment used for each
+        // bounding box during intersection testing
+        OrientedBoundingBox.setEpsilon(
+                AV3DConstants.DEFAULT_EMBEDDING_DEPTH + 0.000001f);
+        collisionManager = new EntityCollisionManager(
+            model,
+            mgmtObserver,
+            errorReporter);
+
+        newWall = false;
+
+        pickManager = new PickManager(rootGroup);
+        editorState = LocationEditorState.getInstance();
+
+        initialActionData = new ActionData();
+        initialActionData.zoneOri = ZoneOrientation.VERTICAL;
+        initialActionData.model = model;
+        initialActionData.pickManager = pickManager;
+
+        ViewEnvironment viewEnv = scene.getViewEnvironment();
+        viewEnv.setProjectionType(ViewEnvironment.ORTHOGRAPHIC_PROJECTION);
+
+        zoneView = new ZoneView(
+            viewEnv,
+            model,
+            controller,
+            navStatusManager);
+
+        ///////////////////////////////////////////////////////////////////
+        //SHADOW SEGMENTENTITY
+
+        shadowSegmentMousePosition = new double[3];
+        shadowEntityWasVertex = false;
+
+        shadowEntityLastPosition = new double[3];
+        shadowSegmentStartVertexID = -1;
+        shadowVertexEntityID = -1;
+
+        ////////////////////////////////////////////////////////////////
+        // event responders
+
+        addEntityResponse =
+            new AddEntityResponse(model, controller, reporter);
+
+        addSegmentableEntityResponse =
+            new AddSegmentableEntityResponse(model, controller, reporter);
+
+        addVertexEntityResponse =
+            new AddVertexEntityResponse(model, reporter);
+
+        addAutoSpanEntityResponse =
+            new AddAutoSpanEntityResponse(model, controller, reporter);
+
+        entityMoveResponse =
+            new EntityMoveResponse(model, controller, reporter, viewEnv);
+
+        entityMoveTransientResponse =
+            new EntityMoveTransientResponse(model, controller, reporter, viewEnv);
+
+        modelTransitionResponse =
+            new ModelTransitionResponse(model, controller, reporter, viewEnv);
+
+        modelTransitionTransientResponse =
+            new ModelTransitionTransientResponse(model, controller, reporter, viewEnv);
+
+        addTemplateEntityResponse =
+            new AddTemplateEntityResponse(model, controller, reporter);
+
+        modelMoveTransientResponse =
+            new ModelMoveTransientResponse(model, controller, reporter, viewEnv);
+
+        ////////////////////////////////////////////////////////////////
+        // local collections
+        locationEntityMap = new HashMap<Integer, LocationEntity>();
+        locationGroupMap = new HashMap<Integer, Group>();
+        locationManagerMap = new HashMap<Integer, AV3DEntityManager>();
+
+        entityMap = new HashMap<Integer, Entity>();
+
+        nodeAddList = new ArrayList<Node>();
+        nodeRemoveList = new ArrayList<Node>();
+
+        ////////////////////////////////////////////////////////////////
+        // check for the existence of a SceneEntity, initialize
+        Entity[] rootEntities = model.getModelData();
+        for (int i = 0; i < rootEntities.length; i++) {
+            if (rootEntities[i] instanceof SceneEntity) {
+                // there should only be one....
+                setSceneEntity((SceneEntity)rootEntities[i]);
+                break;
+            }
+        }
+
+        model.addModelListener(this);
+
+        // variables for zoom
+        trackerState = new TrackerState();
+        moveCount = 0;
+    }
+
+    //---------------------------------------------------------------
+    // Methods defined by PerFrameUIObserver
+    //---------------------------------------------------------------
+
+
+
+    /**
+     * A new frame tick is observed
+     */
+    public void processNextFrameUI() {
+
+        //
+        // Handle mouse wheel zooms
+        //
+        if(trackerState.ctrlModifier == true){
+
+            if (moveCount < 0) {
+                currentNavController.start(trackerState);
+            } else{
+                if (zoom == -1)
+                    trackerState.devicePos[1] -= ZOOM_AMOUNT;
+                else
+                    trackerState.devicePos[1] += ZOOM_AMOUNT;
+
+                currentNavController.move(trackerState);
+            }
+            if (moveCount > 0) {
+                currentNavController = null;
+
+                // restore the previous mode
+                if (previousNavMode != currentNavMode) {
+                    navManager.setNavigationMode(previousNavMode);
+                }
+                // switch out of zoom mode
+                trackerState.ctrlModifier = false;
+            }
+        }
+        moveCount++;
+
+
+
+        // clear any previous pick results
+        pickManager.reset();
+
+        // reconfigure the viewpoint first, in case any
+        // subsequent operations rely on the view parameters
+        if (doNavigationReset) {
+            if (activeZoneEntity != null) {
+                zoneView.configView(activeZoneEntity);
+                doNavigationReset = false;
+            }
+        }
+
+        // establish mode of operation based on current mode
+        // and variable values
+        if (activeZoneEntity == null) {
+            editorState.currentMode = EditorMode.INACTIVE;
+        } else {
+            switch (editorState.currentMode) {
+            case INACTIVE:
+                if (activeZoneEntity != null) {
+                    editorState.currentMode = EditorMode.SELECTION;
+                }
+                break;
+            case SELECTION:
+                if (currentTool != null) {
+                    editorState.currentMode = EditorMode.PLACEMENT;
+                }
+                break;
+            case PLACEMENT:
+                if (currentTool == null) {
+                    editorState.currentMode = EditorMode.SELECTION;
+                }
+                break;
+            }
+        }
+        // if in an active mode, process the user input
+        if (editorState.currentMode != EditorMode.INACTIVE) {
+
+            Entity moe = (Entity)mouseOverEntity;
+
+            pressProcessed = false;
+            releaseProcessed = false;
+            deviceManager.processTrackers(id, this);
+
+            boolean moeCheck = (moe != null) && (moe == mouseOverEntity);
+            boolean anchorCheck = (editorState.mouseOverAnchor != null);
+            if (moeCheck || anchorCheck) {
+                frameCount++;
+                if (frameCount == FRAMES_BEFORE_HOVER_OCCURS) {
+                    if (mouseOverEntity != null ) {
+
+                        //mouseOverEntity.setHighlighted(true);
+
+                    } else if (editorState.mouseOverAnchor != null) {
+
+                        AnchorData ad = editorState.mouseOverAnchor.getAnchorDataFlag();
+                        cursorManager.setCursorMode(ad);
+                    }
+                }
+            } else {
+                frameCount = 0;
+            }
+            ///////////////////////////////////////////////////////////////////
+
+            if (shadowMoveInProgress && !trackerIsOver) {
+
+                AV3DEntityWrapper wrapper = null;
+                if (shadowSegmentEntity != null) {
+                    wrapper =
+                        wrapperMap.get(shadowSegmentEntity.getEntityID());
+                    if (wrapper == null) {
+                        System.out.println("Can't find mapped entity: " + shadowSegmentEntity);
+                    }
+                } else {
+                    wrapper =
+                        wrapperMap.get(shadowEntity.getEntityID());
+
+                    if (wrapper == null) {
+                        System.out.println("Can't find mapped entity: " + shadowEntity);
+                    }
+                }
+
+                if (wrapper != null) {
+                    wrapper.setSwitchGroupIndex(AV3DEntityWrapper.CONTENT_NONE);
+
+                    shadowIsVisible = false;
+                    shadowMoveInProgress = false;
+                }
+
+            } else if (shadowMoveInProgress && !shadowIsVisible) {
+
+                AV3DEntityWrapper wrapper = null;
+
+                if (shadowSegmentEntity != null) {
+                    wrapper =
+                        wrapperMap.get(shadowSegmentEntity.getEntityID());
+                } else {
+                    wrapper =
+                        wrapperMap.get(shadowEntity.getEntityID());
+                }
+
+                if (wrapper != null) {
+                    wrapper.setSwitchGroupIndex(AV3DEntityWrapper.CONTENT_MODEL);
+
+                    shadowIsVisible = true;
+                }
+            }
+        }
+    }
+
+    //---------------------------------------------------------------
+    // Methods defined by PerFrameObserver
+    //---------------------------------------------------------------
+
+    /**
+     * A new frame tick is observed, so do some processing now.
+     */
+    public void processNextFrame() {
+
+        if (configBackground) {
+            mgmtObserver.requestDataUpdate(background, this);
+        }
+        if ((activeEntityManager != null) &&
+            activeEntityManager.hasHierarchyChanged()) {
+
+            visHandler.setEntityChanged();
+        }
+    }
+
+    //---------------------------------------------------------------
+    // Methods defined by UserInputHandler
+    //---------------------------------------------------------------
+
+    /**
+     * Process a tracker press event.
+     *
+     * @param tracker The id of the tracker calling this handler
+     * @param evt The event that caused the method to be called
+     */
+    public void trackerPressed(int tracker, TrackerState evt) {
+
+        if (pressProcessed) {
+            // don't do this twice in one frame
+            return;
+        } else {
+            pressProcessed = true;
+        }
+
+        if (dragInProgress) {
+            // ignore extraneous presses during a drag
+            return;
+        }
+
+        // get the active button
+        for (int i = 0; i < evt.numButtons; i++) {
+            if (evt.buttonState[i]) {
+                activeButton = i;
+                break;
+            }
+        }
+
+        // get the active modifier, if any
+        activeButtonModifier = 0;
+        if (evt.ctrlModifier) {
+            activeButtonModifier = 1;
+        } else if (evt.altModifier) {
+            activeButtonModifier = 2;
+        }
+
+        if (activeButtonModifier == 0) {
+            ////////////////////////////////////////////////////////////////////
+            if (shadowEntity != null ) {
+
+                Entity parent = model.getEntity(
+                    shadowEntity.getParentEntityID());
+
+                // Don't continue if the entity is null
+                if(parent == null){
+                    return;
+                }
+
+                if(shadowEntity instanceof VertexEntity) {
+                    ArrayList<Command> cmdList = new ArrayList<Command>();
+
+                    Command vertexCmd = new RemoveVertexCommand(
+                            model,
+                            (SegmentableEntity)parent,
+                            shadowEntity.getEntityID(), false);
+
+                    vertexCmd.setErrorReporter(errorReporter);
+                    cmdList.add(vertexCmd);
+
+
+                    if(shadowSegmentEntity != null) {
+                        Command segmentCmd = new RemoveSegmentCommand(
+                                model,
+                                (SegmentableEntity)parent,
+                                shadowSegmentEntity.getEntityID(), false);
+                        segmentCmd.setErrorReporter(errorReporter);
+                        cmdList.add(segmentCmd);
+                    }
+
+                    MultiTransientCommand multi =
+                        new MultiTransientCommand(
+                                cmdList,
+                                "Removing Entity -> " +shadowEntity.getEntityID());
+
+                    controller.execute(multi);
+
+                    shadowEntityWasVertex = true;
+                    shadowEntity.getPosition(shadowEntityLastPosition);
+
+                } else {
+                    Command cmd = new RemoveEntityChildCommand(
+                        model, parent, shadowEntity, false);
+
+                    cmd.setErrorReporter(errorReporter);
+                    controller.execute(cmd);
+                }
+
+                shadowEntity = null;
+                shadowSegmentEntity = null;
+                shadowMoveInProgress = false;
+                shadowIsVisible = false;
+            }
+            ////////////////////////////////////////////////////////////////////
+
+            if (activeButton == 0) {
+                if (editorState.currentMode == EditorMode.SELECTION) {
+                    if (pickManager.doPick(evt, false, false)) {
+
+                        PickData pd = pickManager.getResult();
+                        if (pd.object instanceof Entity) {
+
+                            Entity entity = (Entity)pd.object;
+                            String category = entity.getCategory();
+
+                            // only allow a selection event on specific types of entities.
+                            if (categorySet.contains(category)) {
+
+                                ArrayList<Entity> selectedEntityList = new ArrayList<Entity>();
+                                ArrayList<Entity> unselectedEntityList = new ArrayList<Entity>();
+
+                                ArrayList<Entity> currentList = new ArrayList<Entity>();
+                                currentList.addAll(selectionHelper.getSelectedList());
+
+                                if (evt.shiftModifier) {
+
+                                    if (currentList.contains(entity)) {
+                                        unselectedEntityList.add(entity);
+                                        currentList.remove(entity);
+                                    } else {
+                                        selectedEntityList.add(entity);
+                                        currentList.add(entity);
+                                    }
+                                    changeSelection(selectedEntityList, unselectedEntityList);
+                                } else {
+                                    unselectedEntityList.addAll(currentList);
+                                    if (!currentList.contains(entity)) {
+                                        selectedEntityList.add(entity);
+                                        changeSelection(selectedEntityList, unselectedEntityList);
+                                    } else {
+                                        unselectedEntityList.remove(entity);
+                                        changeSelection(selectedEntityList, unselectedEntityList);
+                                    }
+                                    currentList.clear();
+                                    currentList.add(entity);
+                                }
+                                int num_selected = currentList.size();
+                                boolean isMultiSelection = (num_selected > 1);
+                                if (isMultiSelection) {
+                                    // wait for a mouse release to switch to an
+                                    // active mode
+                                    //editorState.currentMode = EditorMode.INACTIVE;
+
+                                    initialActionData.setEntities(currentList);
+                                    initialActionData.setMouseDevicePosition(evt.devicePos);
+                                    initialActionData.setMouseWorldPosition(evt.worldPos);
+                                    initialActionData.zoneWrapper =
+                                        wrapperMap.get(activeZoneEntity.getEntityID());
+                                    initialActionData.wrapperMap = wrapperMap;
+
+                                    for (int i = 0; i < num_selected; i++) {
+                                        entity = currentList.get(i);
+
+                                        if (entity instanceof PositionableEntity) {
+
+                                            PositionableEntity pe = (PositionableEntity)entity;
+                                            int type = entity.getType();
+                                            if ((type == Entity.TYPE_MODEL)) {
+                                                editorState.currentMode = EditorMode.ENTITY_TRANSITION;
+                                            }
+                                        }
+                                    }
+
+                                } else {
+                                    // on single selection, the object representing the
+                                    // entity may be manipulated by the mouse in the editor
+                                    if (entity instanceof PositionableEntity) {
+
+                                        initialActionData.setEntities(currentList);
+                                        initialActionData.setMouseDevicePosition(evt.devicePos);
+                                        initialActionData.setMouseWorldPosition(evt.worldPos);
+                                        initialActionData.zoneWrapper =
+                                            wrapperMap.get(activeZoneEntity.getEntityID());
+                                        initialActionData.wrapperMap = wrapperMap;
+
+                                        int type = entity.getType();
+
+                                        boolean isAutoSpan = false;
+                                        if (currentTool != null) {
+                                            Object obj = currentTool.getProperty(
+                                                Entity.DEFAULT_ENTITY_PROPERTIES,
+                                                ChefX3DRuleProperties.SPAN_OBJECT_PROP);
+
+                                            if ((obj != null) && (obj instanceof Boolean)){
+                                                isAutoSpan = (Boolean)obj;
+                                            }
+                                        }
+
+                                        if (isAutoSpan) {
+                                            editorState.currentMode = EditorMode.ENTITY_TRANSFORM;
+                                        } else if ((type == Entity.TYPE_MODEL) ||
+                                            (type == Entity.TYPE_TEMPLATE_CONTAINER)) {
+                                            editorState.currentMode = EditorMode.ENTITY_TRANSITION;
+                                        } else {
+                                            editorState.currentMode = EditorMode.ENTITY_TRANSFORM;
+                                        }
+                                    }
+                                }
+
+                            } else {
+                                editorState.currentMode = EditorMode.NAVIGATION;
+                            }
+                        }
+                    } else {
+                        if (editorState.currentMode != EditorMode.ANCHOR_TRANSFORM) {
+                            // if the selection layer has NOT set the mode to transform
+                            // then we must be going to navigation
+                            editorState.currentMode = EditorMode.NAVIGATION;
+                        }
+                    }
+                } else if ((editorState.currentMode != EditorMode.ANCHOR_TRANSFORM) &&
+                            (editorState.currentMode != EditorMode.ENTITY_TRANSFORM) &&
+                            (editorState.currentMode != EditorMode.PLACEMENT)) {
+
+                    editorState.currentMode = EditorMode.NAVIGATION;
+                }
+                if (editorState.currentMode == EditorMode.NAVIGATION) {
+                    changeSelection(EMPTY_ENTITY_LIST, true);
+                    navManager.trackerPressed(tracker, evt);
+                }
+            }
+
+        } else {
+            editorState.previousMode = editorState.currentMode;
+            editorState.currentMode = EditorMode.NAVIGATION;
+        }
+    }
+
+    /**
+     * Process a tracker move event.
+     *
+     * @param tracker The id of the tracker calling this handler
+     * @param evt The event that caused the method to be called
+     */
+    public void trackerMoved(int tracker, TrackerState evt) {
+
+        // determine what's under the mouse
+        if (editorState.mouseOverAnchor != null) {
+            cursorManager.setCursorMode(ActionMode.NONE);
+        }
+
+        // sidepocket the zone relative mouse position
+        zoneRelativeMousePosition.set(evt.worldPos);
+        invZoneMtx.transform(zoneRelativeMousePosition);
+
+        boolean isPickResult = pickManager.doPick(evt);
+        trackerIsOver = isPickResult;
+
+        if (editorState.currentMode == EditorMode.PLACEMENT) {
+            if ((shadowEntity != null) && trackerIsOver) {
+
+                double[] position = new double[3];
+                float[] size = new float[3];
+                shadowEntity.getSize(size);
+
+                Command cmd = null;
+
+                boolean isAutoSpan = false;
+                if (currentTool != null) {
+                    Object obj = currentTool.getProperty(
+                        Entity.DEFAULT_ENTITY_PROPERTIES,
+                        ChefX3DRuleProperties.SPAN_OBJECT_PROP);
+
+                    if ((obj != null) && (obj instanceof Boolean)){
+                        isAutoSpan = (Boolean)obj;
+                    }
+                }
+
+                boolean shadowPlaced = false;
+                if (!isAutoSpan && isPickResult) {
+                    // place the shadow where the product would be placed
+                    PickData pd = pickManager.getResult();
+                    if (shadowEntity instanceof VertexEntity) {
+
+                        int parentID = shadowEntity.getParentEntityID();
+                        SegmentableEntity segmentableEntity =
+                            (SegmentableEntity)model.getEntity(parentID);
+
+                        if (segmentableEntity == null) {
+                            return;
+                        }
+
+                        // always place vertices against the zone
+                        if (pd.object == shadowEntity) {
+                            pd = pickManager.getResult(activeZoneEntity);
+                        }
+
+                        if (pd != null) {
+                         // convert the mouse position from world to zone coordinates
+                            pnt.set(evt.worldPos);
+                            toZoneRelative(pnt);
+
+                            position[0] = pnt.x; //pd.point.x;
+                            position[1] = pnt.y; //pd.point.y;
+
+                            position[2] = pnt.z; //pd.point.z + (size[2] * 0.5f - AV3DConstants.DEFAULT_EMBEDDING_DEPTH);
+
+                            cmd = new MoveVertexTransientCommand(
+                                model,
+                                transactionID,
+                                (VertexEntity)shadowEntity,
+                                position,
+                                new float[3]);
+
+                            shadowPlaced = true;
+                        }
+                    } else {
+
+                        PickData zone_pd = pickManager.getResult(activeZoneEntity);
+                        if (zone_pd != null) {
+
+                            // check to make sure its in the data model already
+                            Entity check = model.getEntity(shadowEntity.getEntityID());
+                            if (check == null) {
+                                return;
+                            }
+
+                            Entity[] entityArr = new Entity[]{shadowEntity};
+                            //if (!shadowMoveInProgress) {
+                                initialActionData.zoneWrapper =
+                                    wrapperMap.get(activeZoneEntity.getEntityID());
+                                initialActionData.wrapperMap = wrapperMap;
+                                modelMoveTransientResponse.setActionData(
+                                    initialActionData);
+                            //}
+                            modelMoveTransientResponse.doEventResponse(
+                                tracker,
+                                evt,
+                                entityArr,
+                                null);
+
+                            shadowPlaced = true;
+                        }
+                    }
+                }
+                if (!shadowPlaced) {
+                    // convert the mouse position from world to zone coordinates
+                    pnt.set(evt.worldPos);
+                    toZoneRelative(pnt);
+
+                    // place the shadow in the zone's plane,
+                    // plus half the object dimension
+                    position[0] = pnt.x;
+                    position[1] = pnt.y;
+                    position[2] = (size[2] * 0.5f - AV3DConstants.DEFAULT_EMBEDDING_DEPTH);
+
+                    cmd = new MoveEntityTransientCommand(
+                        model,
+                        model.issueTransactionID(),
+                        shadowEntity.getEntityID(),
+                        position,
+                        new float[3]);
+                }
+
+                if (cmd != null) {
+                    cmd.setErrorReporter(errorReporter);
+                    controller.execute(cmd);
+                }
+
+                shadowMoveInProgress = true;
+
+            }
+
+        } else {
+
+            if (isPickResult) {
+
+                PickData pd = pickManager.getResult();
+                if (pd.object instanceof Entity) {
+
+                    mouseOverEntity = (Entity)pd.object;
+
+                } else {
+
+                    if ((mouseOverEntity != null) && mouseOverEntity.isHighlighted()) {
+                        mouseOverEntity.setHighlighted(false);
+                    }
+
+                    mouseOverEntity = null;
+                }
+            } else {
+
+                if ((mouseOverEntity != null) && mouseOverEntity.isHighlighted()) {
+                    mouseOverEntity.setHighlighted(false);
+                }
+                mouseOverEntity = null;
+            }
+        }
+        shadowSegmentMousePosition[0] = evt.worldPos[0];
+        shadowSegmentMousePosition[1] = evt.worldPos[1];
+        shadowSegmentMousePosition[2] = evt.worldPos[2];
+    }
+
+    /**
+     * Process a tracker drag event.
+     *
+     * @param tracker The id of the tracker calling this handler
+     * @param evt The event that caused the method to be called
+     */
+    public void trackerDragged(int tracker, TrackerState evt) {
+
+        // sidepocket the zone relative mouse position
+        zoneRelativeMousePosition.set(evt.worldPos);
+        invZoneMtx.transform(zoneRelativeMousePosition);
+
+        if (activeButton == 0) {
+            if (editorState.currentMode == EditorMode.NAVIGATION) {
+
+                navManager.trackerDragged(tracker, evt);
+
+            } else if (editorState.currentMode == EditorMode.ENTITY_TRANSFORM) {
+
+                ArrayList<Entity> selectedList = selectionHelper.getSelectedList();
+
+                // can only be in this mode if there is a single selection
+                if (selectedList != null && selectedList.size() == 1) {
+                    Entity entity = selectedList.get(0);
+                    Entity[] entityArr = new Entity[] {entity};
+
+                    if (!dragInProgress) {
+                        cursorManager.setCursorMode(ActionMode.MOVEMENT);
+                        entityMoveTransientResponse.setActionData(
+                            initialActionData);
+                    }
+                    entityMoveTransientResponse.doEventResponse(
+                        tracker,
+                        evt,
+                        entityArr,
+                        null);
+                }
+
+            } else if (editorState.currentMode == EditorMode.ENTITY_TRANSITION) {
+
+                pickManager.doPick(evt);
+
+                ArrayList<Entity> selectedList = selectionHelper.getSelectedList();
+
+                Entity[] entityArr = new Entity[selectedList.size()];
+                selectedList.toArray(entityArr);
+
+                if (!dragInProgress) {
+                    cursorManager.setCursorMode(ActionMode.MOVEMENT);
+                    modelTransitionTransientResponse.setActionData(
+                        initialActionData);
+                }
+                modelTransitionTransientResponse.doEventResponse(
+                    tracker,
+                    evt,
+                    entityArr,
+                    null);
+            }
+            dragInProgress = true;
+        }
+    }
+
+    /**
+     * Process a tracker release event.
+     *
+     * @param tracker The id of the tracker calling this handler
+     * @param evt The event that caused the method to be called
+     */
+    public void trackerReleased(int tracker, TrackerState evt) {
+
+        boolean hasMoved = dragInProgress;
+        dragInProgress = false;
+
+        if (releaseProcessed) {
+            // don't do this twice in one frame
+            return;
+        } else {
+            releaseProcessed = true;
+        }
+
+        if (activeButtonModifier == 0) {
+
+            if (activeButton == 0) {
+
+                ArrayList<Entity> selectedList = selectionHelper.getSelectedList();
+
+                Entity entity = null;
+                // TODO: use the first selected entity for now
+                if (selectedList.size() > 0) {
+                    entity = selectedList.get(0);
+                }
+
+                if (editorState.currentMode == EditorMode.NAVIGATION) {
+
+                    navManager.trackerReleased(tracker, evt);
+
+                } else if (editorState.currentMode == EditorMode.ENTITY_TRANSFORM) {
+                    if (hasMoved) {
+                        // Prevent multi-selections from calculating transforms
+                        if (selectedList.size() == 1) {
+
+                            entityMoveResponse.setActionData(initialActionData);
+                            entityMoveResponse.doEventResponse(
+                                tracker,
+                                evt,
+                                new Entity[]{entity},
+                                null);
+
+                            cursorManager.setCursorMode(ActionMode.NONE);
+                        }
+                    }
+                }  else if (editorState.currentMode == EditorMode.ENTITY_TRANSITION) {
+                    if (hasMoved) {
+                        Entity[] list = new Entity[selectedList.size()];
+                        selectedList.toArray(list);
+
+                        // allow multi-selections from calculating transforms
+                        pickManager.doPick(evt);
+
+                        modelTransitionResponse.setActionData(
+                            initialActionData);
+                        modelTransitionResponse.doEventResponse(
+                            tracker,
+                            evt,
+                            list,
+                            null);
+
+                        cursorManager.setCursorMode(ActionMode.NONE);
+                    }
+                } else if (editorState.currentMode == EditorMode.PLACEMENT) {
+
+                    switch(currentTool.getToolType()) {
+
+                    case Entity.TYPE_WORLD:
+                    case Entity.TYPE_LOCATION:
+                    case Entity.TYPE_ENVIRONMENT:
+                        // should never see this
+                        System.out.println("Unknown error, we're going down.");
+                        break;
+
+                    case Entity.TYPE_CONTENT_ROOT:
+                        //
+                        break;
+
+                    case Entity.TYPE_MULTI_SEGMENT:
+                        /*
+                         *  If an entity is selected and the tool that created
+                         *  it is selected then add vertices onto the existing
+                         *  entity.
+                         *
+                         *  If no existing entity is selected, then add a new
+                         *  segmentable entity.
+                         */
+
+                        // TODO: reset the selected list for now
+                        // selectionHelper.clearSelectedList();
+
+                        Entity parent = null;
+                        if (activeLocationEntity != null) {
+                            parent = activeLocationEntity.getContentContainerEntity();
+                        }
+
+                        if (entity instanceof SegmentableEntity &&
+                            ((SegmentableEntity)entity).getToolName().equals(currentTool.getName())){
+
+                            addVertexEntityResponse.setEntityBuilder(entityBuilder);
+                            addVertexEntityResponse.doEventResponse(
+                                tracker,
+                                evt,
+                                new Entity[] {entity},
+                                currentTool);
+
+                        } else if (parent != null) {
+                            Entity segmentableEntity = null;
+                            if (parent instanceof ContentContainerEntity){
+
+                                segmentableEntity =
+                                    activeEntityManager.getSegmentableEntity();
+                            }
+                            if (segmentableEntity == null) {
+                                addSegmentableEntityResponse.setEntityBuilder(entityBuilder);
+                                addSegmentableEntityResponse.doEventResponse(
+                                    tracker,
+                                    evt,
+                                    new Entity[] {parent},
+                                    currentTool);
+
+
+                            } else {
+                                ArrayList<VertexEntity> vertexList =
+                                    ((SegmentableEntity)segmentableEntity).getVertices();
+
+                                boolean vertexCheck = false;  // boolean segmentCheck = false;
+
+                                if (shadowEntityWasVertex &&
+                                    (vertexList != null) &&
+                                    (vertexList.size() > 1)) {
+
+                                    // convert the mouse position from world to zone coordinates
+                                    for (int i = 0; i < vertexList.size(); i++) {
+                                        int lastVertexID = vertexList.get(i).getEntityID();
+                                        //SOMETIMES THE SHADOW VERTEX HASN'T BEEN REMOVED YET
+                                        // Nor do we want it merging with the vertex it is connected too.
+                                        if(shadowVertexEntityID == lastVertexID ||
+                                            shadowSegmentStartVertexID == lastVertexID )
+                                            continue;
+                                        else if (withinTolerance(shadowEntityLastPosition, vertexList.get(i))) {
+                                            /*List<Entity> selectedEntityList = new ArrayList<Entity>();
+                                            selectedEntityList.add(vertexList.get(i));
+                                            changeSelection(selectedEntityList, true);*/
+
+
+                                            // set flag in segmentable  and merge vertex
+//System.out.println("lastVertexID: " + lastVertexID);
+//System.out.println("shadowSegmentStartVertexID: " + shadowSegmentStartVertexID);
+//System.out.println("shadowVertexEntityID: " + shadowVertexEntityID);
+//System.out.println("MERGING");
+                                            addVertexEntityResponse.setMergingVertex(vertexList.get(i));
+                                            addVertexEntityResponse.doEventResponse(
+                                                tracker,
+                                                evt,
+                                                new Entity[] {segmentableEntity},
+                                                currentTool);
+
+                                            vertexCheck = true;
+                                            break;
+                                        }
+                                    }
+                                }
+
+                                if (!vertexCheck ) {
+                                    addVertexEntityResponse.setEntityBuilder(entityBuilder);
+                                    addVertexEntityResponse.doEventResponse(
+                                        tracker,
+                                        evt,
+                                        new Entity[] {segmentableEntity},
+                                        currentTool);
+                                }
+                            }
+                        }
+                        newWall = false;
+                        shadowEntityWasVertex = false;
+                        break;
+
+                    case Entity.TYPE_INTERSECTION:
+                        Entity segmentableEntity = null;
+                        segmentableEntity =
+                            activeEntityManager.getSegmentableEntity();
+
+                        if (splitSegment) {
+
+                            // convert the mouse position from world to zone
+                            // coordinates
+                            pnt.set(evt.worldPos);
+                            toZoneRelative(pnt);
+
+                            double[] position = new double[3];
+                            position[0] = pnt.x;
+                            position[1] = pnt.y;
+
+                            ArrayList<SegmentEntity> segmentList = ((SegmentableEntity)segmentableEntity).getSegments();
+
+                            for(int i =0; i< segmentList.size(); i++) {
+                                SegmentEntity splitSegmentEntity = segmentList.get(i);
+                                if (withinTolerance(position, splitSegmentEntity)) {
+
+                                    if(splitSegmentEntity.hasChildren()) {
+
+                                        String popupMessage = intlMgr.getString(CONFIRM_MSG);
+                                        if(!(popUpConfirm.showMessage(popupMessage))){
+                                            return;
+                                        }
+                                    }
+
+                                    addVertexEntityResponse.setSplittingSegment((SegmentEntity)splitSegmentEntity);
+                                    addVertexEntityResponse.setEntityBuilder(entityBuilder);
+                                    addVertexEntityResponse.doEventResponse(
+                                        tracker,
+                                        evt,
+                                        new Entity[] {segmentableEntity},
+                                        currentTool);
+                                    break;
+                                }
+                            }
+                        }
+
+                        break;
+
+                    case Entity.TYPE_BUILDING:
+                        // TODO: support buildings
+                        break;
+
+                    case Entity.TYPE_TEMPLATE_CONTAINER:
+
+                        // convert the mouse position from world to zone coordinates
+                        pnt.set(evt.worldPos);
+                        toZoneRelative(pnt);
+
+                        // place the template in the zone's plane
+                        double[] pstn = new double[3];
+                        pstn[0] = pnt.x;
+                        pstn[1] = pnt.y;
+                        pstn[2] = 0;
+
+                        currentTool.setProperty(
+                            Entity.DEFAULT_ENTITY_PROPERTIES,
+                            PositionableEntity.POSITION_PROP,
+                            pstn);
+
+                        initialActionData.zoneWrapper =
+                            wrapperMap.get(activeZoneEntity.getEntityID());
+                        initialActionData.wrapperMap = wrapperMap;
+                        addTemplateEntityResponse.setActionData(initialActionData);
+                        addTemplateEntityResponse.setEntityBuilder(entityBuilder);
+                        addTemplateEntityResponse.doEventResponse(
+                            tracker,
+                            evt,
+                            null,
+                            currentTool);
+
+                        break;
+
+                    case Entity.TYPE_MODEL:
+
+                        boolean isAutoSpan = false;
+                        if (currentTool != null) {
+                            Object obj = currentTool.getProperty(
+                                Entity.DEFAULT_ENTITY_PROPERTIES,
+                                ChefX3DRuleProperties.SPAN_OBJECT_PROP);
+
+                            if ((obj != null) && (obj instanceof Boolean)){
+                                isAutoSpan = (Boolean)obj;
+                            }
+                        }
+
+                        if (isAutoSpan) {
+                            initialActionData.zoneWrapper =
+                                wrapperMap.get(activeZoneEntity.getEntityID());
+                            addAutoSpanEntityResponse.setActionData(initialActionData);
+                            addAutoSpanEntityResponse.setEntityBuilder(entityBuilder);
+
+                            addAutoSpanEntityResponse.doEventResponse(
+                                tracker,
+                                evt,
+                                null,
+                                currentTool);
+                        } else {
+                            initialActionData.zoneWrapper =
+                                wrapperMap.get(activeZoneEntity.getEntityID());
+                            initialActionData.wrapperMap = wrapperMap;
+                            addEntityResponse.setActionData(initialActionData);
+                            addEntityResponse.setEntityBuilder(entityBuilder);
+
+                            addEntityResponse.doEventResponse(
+                                tracker,
+                                evt,
+                                null,
+                                currentTool);
+                        }
+                        break;
+                    }
+
+                    String toolName =
+                        intlMgr.getString("com.yumetech.chefx3d.editor.catalog.tool.addWall");
+                    if (toolName == null) {
+                        toolName = "Add Wall";
+                    }
+
+                    if ((currentTool != null) && (shadowEntity == null) &&
+                        !(currentTool.getName().equals(toolName))) {
+                        // rem: this is convoluted and I don't really
+                        // understand it, but this clears the active tool
+                        // when a placement fails. A C&P from the
+                        // childInsertedAt() method
+                        ViewManager.getViewManager().setTool(null);
+                        ToolBarManager.getToolBarManager().setTool(null);
+                    }
+                }
+            } else if (activeButton == 2) {
+
+                changeSelection(EMPTY_ENTITY_LIST, true);
+                ViewManager.getViewManager().setTool(null);
+                ToolBarManager.getToolBarManager().setTool(null);
+            }
+            editorState.currentMode = EditorMode.SELECTION;
+
+        } else {
+            editorState.currentMode = editorState.previousMode;
+        }
+        activeButton = -1;
+    }
+
+    /**
+     * Process a tracker click event.
+     *
+     * @param tracker The id of the tracker calling this handler
+     * @param evt The event that caused the method to be called
+     */
+    public void trackerClicked(int tracker, TrackerState evt) {
+        // TODO: not sure this is the correct thing to do yet,
+        // for now treat a click as a full press and release
+        trackerPressed(tracker, evt);
+        trackerReleased(tracker, evt);
+    }
+
+    /**
+     * Process a tracker orientation event.
+     *
+     * @param tracker The id of the tracker calling this handler
+     * @param evt The event that caused the method to be called
+     */
+    public void trackerOrientation(int tracker, TrackerState evt) {
+    }
+
+    /**
+     * Process the buttons on a tracker.  No other state will be read.
+     *
+     * @param tracker The id of the tracker calling this handler
+     * @param state The current state.
+     */
+    public void trackerButton(int tracker, TrackerState state) {
+    }
+
+    /**
+     * Process the wheel on a tracker.  No other state will be read.
+     *
+     * @param tracker The id of the tracker calling this handler
+     * @param state The current state.
+     */
+    public void trackerWheel(int tracker, TrackerState state) {
+
+        if (editorState.currentMode == EditorMode.ENTITY_TRANSFORM) {
+            // TODO: hax for now to stop rotation on walls
+            // this should be rules-based.
+            if (activeZoneEntity.getType() == Entity.TYPE_SEGMENT) {
+                return;
+            }
+
+            mouseWheelClick += state.wheelClicks;
+
+            if (!inTransient) {
+                transactionID = model.issueTransactionID();
+                inTransient = true;
+            }
+
+            ArrayList<Entity> selectedList = selectionHelper.getSelectedList();
+
+            Entity entity = null;
+            // TODO: use the first selected entity for now
+            if (selectedList.size() > 0) {
+                entity = selectedList.get(0);
+            }
+
+            if(entity != null){
+                float[] tmpRot = new float[4];
+                tmpRot[0] = 0;
+                tmpRot[1] = 0;
+                tmpRot[2] = 1;
+                tmpRot[3] = (float) ((mouseWheelClick*10) / 180.0f) * (float) Math.PI;
+
+                RotateEntityTransientCommand cmd = new RotateEntityTransientCommand(
+                    model,
+                    transactionID,
+                    entity.getEntityID(),
+                    tmpRot);
+
+                cmd.setErrorReporter(errorReporter);
+                model.applyCommand(cmd);
+            }
+        } else if(editorState.currentMode == EditorMode.SELECTION ){
+
+            //
+            // Initialize for navigation. Reset the tracker object,
+            // setup the navigation mode.
+            //
+            trackerState.devicePos[0] = 0;
+            trackerState.devicePos[1] = 0;
+            trackerState.devicePos[2] = 0;
+
+            currentNavMode = NavigationMode.PANZOOM;
+            trackerState.ctrlModifier = true;
+
+
+            previousNavMode = navManager.getNavigationMode();
+
+            if (previousNavMode != currentNavMode) {
+                navManager.setNavigationMode(currentNavMode);
+            }
+
+            //
+            // Start call backs on the view's update thread
+            //
+            moveCount = -1;
+            //mgmtObserver.addUIObserver(this);
+            currentNavController =
+                navManager.getNavigationModeController();
+
+
+            //
+            // Set the zoom: are we zooming in or out?
+            //
+            zoom = state.wheelClicks;
+        }
+    }
+
+
+    //----------------------------------------------------------
+    // Methods defined by NodeUpdateListener
+    //----------------------------------------------------------
+
+    /**
+     * Notification that its safe to update the node now with any operations
+     * that could potentially effect the node's bounds.
+     *
+     * @param src The node or Node Component that is to be updated.
+     */
+    public void updateNodeBoundsChanges(Object src) {
+
+        if (src == rootGroup) {
+
+            int numToRemove = nodeRemoveList.size();
+            if (numToRemove > 0) {
+                for(int i = 0; i < numToRemove; i++) {
+                    Node node = nodeRemoveList.get(i);
+                    rootGroup.removeChild(node);
+                }
+                nodeRemoveList.clear();
+            }
+
+            int numToAdd = nodeAddList.size();
+            if (numToAdd > 0) {
+                for(int i = 0; i < numToAdd; i++) {
+                    Node node = nodeAddList.get(i);
+                    rootGroup.addChild(node);
+                }
+                nodeAddList.clear();
+            }
+        }
+    }
+
+    /**
+     * Notification that its safe to update the node now with any operations
+     * that only change the node's properties, but do not change the bounds.
+     *
+     * @param src The node or Node Component that is to be updated.
+     */
+    public void updateNodeDataChanges(Object src) {
+
+        if ((src == background) && configBackground) {
+
+            background.setColor(backgroundColorArray);
+            configBackground = false;
+
+        }
+    }
+
+    //----------------------------------------------------------
+    // Methods for EntityPropertyListener
+    //----------------------------------------------------------
+
+    public void propertiesUpdated(List<EntityProperty> properties) {
+        // TODO: should probably do something with this.......
+    }
+
+    public void propertyAdded(int entityID, String propertySheet,
+        String propertyName) {
+
+    }
+
+    public void propertyRemoved(int entityID, String propertySheet,
+        String propertyName) {
+
+    }
+
+    public void propertyUpdated(int entityID, String propertySheet,
+        String propertyName, boolean ongoing) {
+
+        Entity entity = model.getEntity(entityID);
+
+        if (entity instanceof LocationEntity) {
+            if (entity == activeLocationEntity) {
+
+                if (propertyName.equals(LocationEntity.ACTIVE_ZONE_PROP)) {
+                    // update the active zone
+                    int zoneID = activeLocationEntity.getActiveZoneID();
+                    zoneSelected(zoneID);
+
+                } else if (propertyName.equals(LocationEntity.BACKGROUND_COLOR_PROP)) {
+                    // configure the background
+                    Color color = activeLocationEntity.getBackgroundColor();
+                    float[] backgroundColor;
+                    if (color != null) {
+                        backgroundColor = color.getColorComponents(null);
+                    } else {
+                        backgroundColor = DEFAULT_BACKGROUND_COLOR;
+                    }
+                    configBackground(backgroundColor);
+                }
+            }
+        }
+    }
+
+    //------------------------------------------------------------------------
+    // Methods required by ResizeListener
+    //------------------------------------------------------------------------
+
+    /**
+     * window size has been updated
+     */
+    public void sizeChanged(int newWidth, int newHeight){
+
+        if ((newWidth > 0) && (newHeight > 0)) {
+
+            ViewEnvironment ve = scene.getViewEnvironment();
+
+            if( !initialViewFrustumSet ){
+
+                ve.setProjectionType(ViewEnvironment.ORTHOGRAPHIC_PROJECTION);
+                ve.setOrthoParams(-newWidth*.01f,
+                    newWidth*.01f,
+                    -newHeight*.01f,
+                    newHeight*.01f);
+                ve.setAspectRatio(0);
+                ve.setClipDistance(0.001, 1000.0);
+
+                // initialization of scene is to the minimum size
+                initialViewFrustumSet = true;
+            }
+            else {
+
+                doNavigationReset = true;
+                float widthRatio = 1;
+                float heightRatio = 1;
+
+                if(oldPixelWidth > 0)
+                    widthRatio = (float)newWidth / (float)oldPixelWidth;
+                if(oldPixelHeight > 0)
+                    heightRatio = (float)newHeight / (float)oldPixelHeight;
+
+                ve.setOrthoParams(viewFrustum[0] * widthRatio,
+                    viewFrustum[1] * widthRatio,
+                    viewFrustum[2] * heightRatio,
+                    viewFrustum[3] * heightRatio);
+            }
+
+            oldPixelWidth = newWidth;
+            oldPixelHeight = newHeight;
+
+            double[] tmp = new double[6];
+            ve.getViewFrustum(tmp);
+
+            navStatusManager.fireViewportSizeChanged(tmp);
+
+            ve.getViewFrustum(viewFrustum);
+            //      System.out.println("locationview frustum: " + java.util.Arrays.toString(viewFrustum));
+        }
+    }
+
+
+    //----------------------------------------------------------
+    // Methods for EntityChildListener
+    //----------------------------------------------------------
+
+    /**
+     * A child was added.
+     *
+     * @param parentID The entity ID of the parent
+     * @param childID The entity ID of the child
+     */
+    public void childAdded(int parentID, int childID) {
+
+        Entity parentEntity = entityMap.get(parentID);
+        int index = parentEntity.getChildIndex(childID);
+
+        childInsertedAt(parentID, childID, index);
+    }
+
+    /**
+     * A child was inserted.
+     *
+     * @param parentID The entity ID of the parent
+     * @param childID The entity ID of the child
+     * @param index The index the child was inserted at
+     */
+    public void childInsertedAt(int parentID, int childID, int index) {
+
+        Entity parentEntity = entityMap.get(parentID);
+        Entity childEntity = parentEntity.getChildAt(index);
+
+        if (parentEntity instanceof SceneEntity &&
+            childEntity instanceof LocationEntity) {
+
+            LocationEntity le = (LocationEntity)childEntity;
+
+            le.addEntityPropertyListener(this);
+
+            recursiveAdd(le);
+
+            addLocationEntity(le);
+
+            if (activeLocationEntity == null) {
+                setActiveLocationEntity(le);
+            }
+
+        } else if (parentEntity instanceof LocationEntity &&
+            childEntity instanceof ViewpointContainerEntity) {
+
+            if (parentEntity == activeLocationEntity) {
+                ViewpointContainerEntity vce =
+                    (ViewpointContainerEntity)childEntity;
+                navManager.setViewpointContainerEntity(vce);
+            }
+
+        } else {
+            // all others get the default set of listeners
+            recursiveAdd(childEntity);
+        }
+
+        // TODO: once we redo the template locations we need to clean up the special
+        // case for add wall tool.
+        String toolName =
+            intlMgr.getString("com.yumetech.chefx3d.editor.catalog.tool.addWall");
+        if (toolName == null) {
+            toolName = "Add Wall";
+        }
+
+        if (currentTool != null &&
+                shadowEntity == null &&
+                !currentTool.getName().equals(toolName)) {
+            ViewManager.getViewManager().setTool(null);
+            ToolBarManager.getToolBarManager().setTool(null);
+        }
+    }
+
+    /**
+     * A child was removed.
+     *
+     * @param parentID The entity ID of the parent
+     * @param childID The entity ID of the child
+     */
+    public void childRemoved(int parentID, int childID) {
+
+        Entity childEntity = entityMap.get(childID);
+
+        if (childEntity != null) {
+            if (childEntity instanceof LocationEntity) {
+
+                LocationEntity le = locationEntityMap.remove(childID);
+
+                le.removeEntityPropertyListener(this);
+
+                AV3DEntityManager mngr = locationManagerMap.remove(childID);
+                mngr.clear();
+
+                if (le == activeLocationEntity) {
+                    setActiveLocationEntity(null);
+                }
+
+                locationGroupMap.remove(childID);
+
+            } else if (childEntity instanceof SegmentEntity) {
+
+                Boolean isShadow =
+                    (Boolean)childEntity.getProperty(
+                            childEntity.getParamSheetName(),
+                            Entity.SHADOW_ENTITY_FLAG);
+
+                if (shadowSegmentEntity != null && isShadow == null) {
+
+                    SegmentEntity segment = (SegmentEntity)childEntity;
+
+                    // check to see if the shadow is attached
+                    VertexEntity startVertex = shadowSegmentEntity.getStartVertexEntity();
+                    if (segment.getEndVertexEntity() == startVertex) {
+
+                        Entity parent = model.getEntity(
+                                shadowEntity.getParentEntityID());
+
+                        // remove the current ghost segment
+                        ArrayList<Command> cmdList = new ArrayList<Command>();
+
+                        Command vertexCmd =
+                            new RemoveVertexCommand(
+                                    model,
+                                    (SegmentableEntity)parent,
+                                    shadowEntity.getEntityID(),
+                                    false);
+                        vertexCmd.setErrorReporter(errorReporter);
+                        cmdList.add(vertexCmd);
+
+                        Command segmentCmd =
+                            new RemoveSegmentCommand(
+                                    model,
+                                    (SegmentableEntity)parent,
+                                    shadowSegmentEntity.getEntityID(),
+                                    false);
+                        segmentCmd.setErrorReporter(errorReporter);
+                        cmdList.add(segmentCmd);
+
+                        // update ghost to the start of the remove segment
+                        shadowEntity = null;
+                        shadowSegmentEntity = null;
+                        SelectEntityCommand selectCmd = new SelectEntityCommand(
+                                model, segment.getStartVertexEntity(), true);
+                        cmdList.add(selectCmd);
+
+                        // stack it all together
+                        MultiCommand multiCmd = new MultiCommand(
+                                cmdList,
+                                "Removing Ghost",
+                                false);
+                        controller.execute(multiCmd);
+
+                    }
+                }
+            }
+            recursiveRemove(childEntity);
+        }
+    }
+
+    // ---------------------------------------------------------------
+    // Methods defined by EntitySelectionListener
+    // ---------------------------------------------------------------
+
+    /**
+     * An entity has been selected
+     *
+     * @param entityID The entity which changed
+     * @param selected Status of selecting
+     */
+    public void selectionChanged(int entityID, boolean selected) {
+if (selected) System.out.println("Selection changed: " + entityID);
+        Entity entity = entityMap.get(entityID);
+        if (entity == null) {
+            // rem: this seems like a problem....
+            return;
+        }
+
+        if (entity instanceof LocationEntity) {
+            if (selected) {
+                LocationEntity le = (LocationEntity)entity;
+                if (le != activeLocationEntity) {
+                    setActiveLocationEntity(le);
+                }
+            }
+            return;
+        }
+
+        if (selected) {
+//System.out.println("SELECTION CHANGE: id = " + entity.getName() +
+//                   ", type = " + AV3DUtils.getTypeString(entity) +
+//                   ", selected = " + selected);
+            int type = entity.getType();
+            if (type == Entity.TYPE_VERTEX) {
+                if (shadowEntity == null) {
+
+                    updateGhostSegment(currentTool);
+
+                }
+            }
+        }
+    }
+
+    /**
+     * An entity has been highlighted
+     *
+     * @param entityID The entity which changed
+     * @param highlighted Status of highlighting
+     */
+    public void highlightChanged(int entityID, boolean highlighted) {
+        //Entity entity = entityMap.get(entityID);
+    }
+
+    //----------------------------------------------------------
+    // Methods required by ModelListener
+    //----------------------------------------------------------
+
+    /**
+     * An entity was added.
+     *
+     * @param local Was this action initiated from the local UI
+     * @param entity The entity
+     */
+    public void entityAdded(boolean local, Entity entity){
+
+        if (entity instanceof SceneEntity) {
+            setSceneEntity((SceneEntity)entity);
+        }
+    }
+
+    /**
+     * An entity was removed.
+     *
+     * @param local Is the request local
+     * @param entity The entity to remove
+     */
+    public void entityRemoved(boolean local, Entity entity) {
+
+        if (entity == sceneEntity) {
+            clear();
+        }
+    }
+
+    /**
+     * The model has been reset.
+     *
+     * @param local Was this action initiated from the local UI
+     */
+    public void modelReset(boolean local) {
+
+    }
+
+    /**
+     * User view information changed.
+     *
+     * @param pos The position of the user
+     * @param rot The orientation of the user
+     * @param fov The field of view changed(X3D Semantics)
+     */
+    public void viewChanged(boolean local, double[] pos, float[] rot, float fov) {
+
+    }
+
+    /**
+     * The master view has changed.
+     *
+     * @param local Is the request local
+     * @param viewID The view which is master
+     */
+    public void masterChanged(boolean local, long viewID) {
+
+    }
+
+    //------------------------------------------------------------------------
+    // Methods defined by MouseListener
+    //------------------------------------------------------------------------
+
+    /**
+     * Notification that the pointing device has entered the
+     * graphics component
+     */
+    public void mouseEntered(MouseEvent e) {
+        trackerIsOver = true;
+    }
+
+    /**
+     * Notification that the pointing device has left the
+     * graphics component
+     */
+    public void mouseExited(MouseEvent e) {
+        trackerIsOver = false;
+    }
+
+    /**
+     * Invoked when the mouse button has been clicked (pressed
+     * and released) on a component.
+     */
+    public void mouseClicked(MouseEvent e){
+        // ignored
+    }
+
+    /**
+     * Invoked when a mouse button has been pressed on a component.
+     */
+    public void mousePressed(MouseEvent e){
+        // ignored
+    }
+
+    /**
+     * Invoked when a mouse button has been released on a component.
+     */
+    public void mouseReleased(MouseEvent e){
+        // ignored
+    }
+
+    //------------------------------------------------------------------------
+    // Local Methods
+    //------------------------------------------------------------------------
+
+    /**
+     * Return the zone relative mouse position in the argument array.
+     * If the arguement is null or less than length 3, a new array
+     * will be allocated and returned.
+     *
+     * @param An array for the return value
+     * @return The array containing the return value
+     */
+    float[] getZoneRelativeMousePosition(float[] position) {
+        if ((position == null) || (position.length  < 3)) {
+            position = new float[3];
+        }
+        zoneRelativeMousePosition.get(position);
+        return(position);
+    }
+
+    /**
+     * Set the selection box / anchor manager
+     *
+     * @param selection The selection box manager
+     */
+    void setSelectionManager(SelectionLayerManager selection) {
+        selectionManager = selection;
+    }
+
+    /**
+     * Return the Entity collision manager
+     *
+     * @return the Entity collision manager
+     */
+    EntityCollisionManager getEntityCollisionManager() {
+        return collisionManager;
+    }
+
+    /**
+     * Return the UserInputHandler for this layer
+     *
+     * @return The UserInputHandler
+     */
+    UserInputHandler getUserInputHandler() {
+        return this;
+    }
+
+    /**
+     * zoneSelected should be triggered by selection a portion of either
+     * the zone or wall selection panel.
+     *
+     * @param entityID The entity associated with the zone
+     */
+    private void zoneSelected(int entityID) {
+
+        // the current wall/zone has been updated
+
+        Entity entity = model.getEntity(entityID);
+
+//System.out.println("the current wall/zone has been updated: " + entity);
+        if (entity == null)
+            return;
+
+        int type = entity.getType();
+
+        // stop is nothing has changed
+
+        // RUSS: the thumb nail processor needs to set the active zone
+        // even if it is the current one, otherwise the viewpoint does not
+        // send out a property update.
+        if (activeZoneEntity == entity) {
+//System.out.println("activeZone1: " + activeZoneEntity);
+            //return;
+        }
+
+        boolean zoneChanged = false;
+        switch (type) {
+        case Entity.TYPE_ZONE:
+        case Entity.TYPE_SEGMENT:
+
+            activeZoneEntity = (ZoneEntity)entity;
+
+            AV3DEntityWrapper activeZoneWrapper =
+                wrapperMap.get(activeZoneEntity.getEntityID());
+            tu.getLocalToVworld(activeZoneWrapper.transformGroup, invZoneMtx);
+            invZoneMtx.invert();
+
+            zoneChanged = true;
+            break;
+
+        default:
+            System.out.println("Unknown type, not setting activeZoneEntity type: " + type);
+        }
+
+//System.out.println("activeZone2: " + activeZoneEntity);
+        if (zoneChanged) {
+
+            // inform those that need to know
+            selectionManager.setActiveZoneEntity(activeZoneEntity);
+            zoneView.configView(activeZoneEntity);
+
+            // do the heavy lifting in the scene graph
+            visHandler.setActiveZoneEntity(activeZoneEntity);
+
+            // clear the tool
+            ViewManager.getViewManager().setTool(null);
+            ToolBarManager.getToolBarManager().setTool(null);
+
+        }
+    }
+
+    /**
+     * Initialize from the SceneEntity
+     *
+     * @param se The new SceneEntity
+     */
+    private void setSceneEntity(SceneEntity se) {
+
+        if (sceneEntity != null) {
+            // a scene already existed, cleanup
+            clear();
+        }
+
+        LocationEntity newActiveLocationEntity = null;
+
+        if (se != null) {
+            sceneEntity = se;
+
+            entityMap.put(sceneEntity.getEntityID(), sceneEntity);
+
+            sceneEntity.addEntityChildListener(this);
+
+            ArrayList<Entity> entityList = sceneEntity.getChildren();
+            for (int i = 0; i < entityList.size(); i++) {
+                Entity e = entityList.get(i);
+                if (e instanceof LocationEntity) {
+                    LocationEntity le = (LocationEntity)e;
+                    addLocationEntity(le);
+                    if (newActiveLocationEntity == null) {
+                        // pick the first one
+                        newActiveLocationEntity = le;
+                    }
+                }
+            }
+        }
+        setActiveLocationEntity(newActiveLocationEntity);
+    }
+
+    /**
+     * Remove objects, references, etc. from the scenegraph
+     */
+    private void clear() {
+
+        sceneEntity.removeEntityChildListener(this);
+
+        for (Iterator<Integer> i = locationEntityMap.keySet().iterator();
+            i.hasNext();) {
+
+            LocationEntity le = locationEntityMap.get(i.next());
+            le.removeEntityPropertyListener(this);
+            recursiveRemove(le);
+        }
+        for (Iterator<Integer> i = locationManagerMap.keySet().iterator();
+            i.hasNext();) {
+
+            AV3DEntityManager mngr = locationManagerMap.get(i.next());
+            mngr.clear();
+        }
+        setActiveLocationEntity(null);
+
+        locationEntityMap.clear();
+        locationGroupMap.clear();
+        locationManagerMap.clear();
+        entityMap.clear();
+
+        activeZoneEntity = null;
+        activeLocationEntity = null;
+        activeLocationGroup = null;
+        sceneEntity = null;
+    }
+
+    /**
+     * Add a new LocationEntity
+     *
+     * @param le The LocationEntity to add
+     */
+    private void addLocationEntity(LocationEntity le) {
+
+        Integer id = new Integer(le.getEntityID());
+        locationEntityMap.put(id, le);
+
+        Group group = new Group();
+        locationGroupMap.put(id, group);
+
+        AV3DEntityManager em = new AV3DEntityManager(
+            mgmtObserver,
+            model,
+            le,
+            group,
+            urlFilter,
+            progressListener,
+            errorReporter);
+
+        locationManagerMap.put(id, em);
+    }
+
+    /**
+     * Get the active LocationEntity
+     *
+     * @return The active LocationEntity
+     */
+    LocationEntity getActiveLocationEntity() {
+        return activeLocationEntity;
+    }
+
+    /**
+     * Set the active LocationEntity
+     *
+     * @param le The new active LocationEntity
+     */
+    private void setActiveLocationEntity(LocationEntity le) {
+
+        if (le == activeLocationEntity) {
+            return;
+        }
+
+        boolean locationIsActive = (activeLocationEntity != null);
+        boolean scheduleGroupChange = false;
+
+        if (locationIsActive) {
+
+            scheduleGroupChange = true;
+            if (nodeAddList.contains(activeLocationGroup)) {
+                nodeAddList.remove(activeLocationGroup);
+            } else {
+                nodeRemoveList.add(activeLocationGroup);
+            }
+            activeLocationGroup = null;
+        }
+
+        activeLocationEntity = le;
+        zoneView.setLocationEntity(activeLocationEntity);
+
+        if (activeLocationEntity != null) {
+
+            int id = activeLocationEntity.getEntityID();
+
+            activeLocationGroup = locationGroupMap.get(id);
+            if (nodeRemoveList.contains(activeLocationGroup)) {
+                nodeRemoveList.remove(activeLocationGroup);
+            } else {
+                nodeAddList.add(activeLocationGroup);
+            }
+            scheduleGroupChange = true;
+
+            Color color = activeLocationEntity.getBackgroundColor();
+            float[] backgroundColor;
+            if (color != null) {
+                backgroundColor = color.getColorComponents(null);
+            } else {
+                backgroundColor = DEFAULT_BACKGROUND_COLOR;
+            }
+            configBackground(backgroundColor);
+
+            ViewpointContainerEntity vce =
+                activeLocationEntity.getViewpointContainerEntity();
+            navManager.setViewpointContainerEntity(vce);
+
+            activeEntityManager = locationManagerMap.get(id);
+            wrapperMap = activeEntityManager.getEntityWrapperMap();
+
+            visHandler.setEntityManager(activeEntityManager);
+            collisionManager.setEntityManager(activeEntityManager);
+            zoneView.setEntityManager(activeEntityManager);
+            selectionManager.setEntityManager(activeEntityManager);
+
+            int zoneID = activeLocationEntity.getActiveZoneID();
+            zoneSelected(zoneID);
+
+        } else {
+            navManager.setViewpointContainerEntity(null);
+            configBackground(DEFAULT_BACKGROUND_COLOR);
+
+            activeEntityManager = null;
+            activeZoneEntity = null;
+            wrapperMap = null;
+
+            visHandler.setEntityManager(null);
+            collisionManager.setEntityManager(null);
+            zoneView.setEntityManager(null);
+            selectionManager.setEntityManager(null);
+        }
+
+        if (scheduleGroupChange) {
+            mgmtObserver.requestBoundsUpdate(rootGroup, this);
+        }
+    }
+
+    /**
+     * Return the NavigationManager
+     *
+     * @return The NavigationManager
+     */
+    NavigationManager getNavigationManager() {
+        return(navManager);
+    }
+
+    /**
+     * Set the active navigation mode
+     *
+     * @param activeMode The new navigation mode
+     */
+    void setNavigationMode(NavigationMode mode) {
+        navManager.setNavigationMode(mode);
+    }
+
+    /**
+     * Return the active navigation mode
+     *
+     * @return The active navigation mode
+     */
+    NavigationMode getNavigationMode() {
+        return(navManager.getNavigationMode());
+    }
+
+    /**
+     * Reset the viewpoint to the default for the editing zone.
+     */
+    void resetNavigation() {
+        doNavigationReset = true;
+    }
+
+    /**
+     * The set of entity categories that can be selected.
+     * Pass-through to the pick manager
+     *
+     * @param categorySet The set of categories
+     */
+    void setSelectionCategories(Set<String> categorySet) {
+        this.categorySet = categorySet;
+    }
+
+    /**
+     * Set the current tool.
+     *
+     * @param tool The tool
+     */
+    void setTool(Tool tool) {
+        ////////////////////////////////////////////////////////////////////
+        if (shadowEntity != null) {
+            Entity parent = model.getEntity(shadowEntity.getParentEntityID());
+            Command cmd = null;
+
+            if (parent != null) {
+                if (shadowEntity instanceof VertexEntity) {
+                    cmd = new RemoveVertexCommand(
+                            model,
+                            (SegmentableEntity)parent,
+                            shadowEntity.getEntityID(),
+                            false);
+
+                    if (shadowSegmentEntity != null) {
+                        Command segmentcmd = new RemoveSegmentCommand(
+                                model,
+                                (SegmentableEntity)parent,
+                                shadowSegmentEntity.getEntityID(),
+                                false);
+
+                        segmentcmd.setErrorReporter(errorReporter);
+                        controller.execute(segmentcmd);
+                    }
+
+                } else {
+                    cmd = new RemoveEntityChildCommand(model, parent, shadowEntity, false);
+                }
+
+                cmd.setErrorReporter(errorReporter);
+                controller.execute(cmd);
+
+            }
+
+            shadowEntity = null;
+            shadowSegmentEntity = null;
+            shadowMoveInProgress = false;
+            shadowIsVisible = false;
+        }
+        ////////////////////////////////////////////////////////////////////
+
+        if (tool != null) {
+            int type = tool.getToolType();
+            if (type != Entity.TYPE_WORLD ||
+                type != Entity.TYPE_TEMPLATE) {
+
+                currentTool = tool;
+
+                cursorManager.setToolCursor(currentTool);
+
+                ///////////////////////////////////////////////////////////////////
+                if (activeZoneEntity != null &&
+                        (type == Entity.TYPE_MODEL ||
+                         type == Entity.TYPE_MULTI_SEGMENT ||
+                         type == Entity.TYPE_INTERSECTION ||
+                         type == Entity.TYPE_TEMPLATE_CONTAINER)) {
+
+                    if (type == Entity.TYPE_MULTI_SEGMENT) {
+                        updateGhostSegment(tool);
+                        newWall = true;
+
+                    } else if (type == Entity.TYPE_INTERSECTION) {
+
+                        //place holder
+                        ArrayList<Entity> selectionList = selectionHelper.getSelectedList();
+
+                        boolean getLast = false;
+                        splitSegment = true;
+
+                    } else {
+                        // place the shadow somewhere remote
+                        double[] position = new double[]{-1000, 0, 0};
+
+                        ////////////////////////////////////////////////////////////////
+                        if (activeZoneEntity instanceof SegmentEntity) {
+                            VertexEntity ve = ((SegmentEntity)activeZoneEntity).getStartVertexEntity();
+                            ve.getPosition(position);
+                            Vector3f right = new Vector3f();
+                            right.set(ZoneOrientation.VERTICAL.right);
+                            // scale it off the charts.....
+                            right.scale(-1000);
+                            position[0] += right.x;
+                            position[1] += right.y;
+                            position[2] += right.z;
+                        }
+                        ////////////////////////////////////////////////////////////////
+
+                        float[] rotation = new float[]{0, 1, 0, 0};
+
+                        ArrayList<Command> cmdList = new ArrayList<Command>();
+
+                        // the shadow entity....
+                        shadowEntity = (PositionableEntity)entityBuilder.createEntity(
+                            model,
+                            model.issueEntityID(),
+                            position,
+                            rotation,
+                            currentTool);
+
+                        // set a property that the entity manager
+                        // understands - and will create a model in shadow
+                        // mode
+                        setShadowState(shadowEntity, true);
+
+                        shadowEntity.setStartingPosition(position);
+
+                        Command cmd = new AddEntityChildTransientCommand(
+                            model,
+                            activeZoneEntity,
+                            shadowEntity);
+                        cmd.setErrorReporter(errorReporter);
+                        cmdList.add(cmd);
+
+                        // the shadow is selected to show the selection box
+                        cmd = new SelectEntityCommand(model, shadowEntity, true);
+                        cmd.setErrorReporter(errorReporter);
+                        cmdList.add(cmd);
+
+                        // clear all selections first
+                        selectionHelper.clearSelectedList();
+
+                        // now execute the command
+                        MultiCommand multiCmd = new MultiCommand(
+                            cmdList,
+                            "Add Entity -> " + shadowEntity.getEntityID(),
+                            false);
+                        multiCmd.setErrorReporter(errorReporter);
+
+                        controller.execute(multiCmd);
+                    }
+                }
+                ///////////////////////////////////////////////////////////////////
+            }
+            editorState.currentMode = EditorMode.PLACEMENT;
+
+        } else {
+
+            currentTool = null;
+            cursorManager.setToolCursor(null);
+            changeSelection(EMPTY_ENTITY_LIST, true);
+            editorState.currentMode = EditorMode.SELECTION;
+        }
+    }
+
+    /**
+     * Return the EntityBuilder
+     *
+     * @return the entityBuilder
+     */
+    EntityBuilder getEntityBuilder() {
+        if (entityBuilder == null) {
+            entityBuilder = DefaultEntityBuilder.getEntityBuilder();
+        }
+
+        return entityBuilder;
+    }
+
+    /**
+     * Set the class used to create entities from tools
+     *
+     * @param entityBuilder The entityBuilder to set
+     */
+    void setEntityBuilder(EntityBuilder entityBuilder) {
+        this.entityBuilder = entityBuilder;
+    }
+
+    /**
+     * Calls the SelectEntityCommand for the new selected entity, or entities
+     * @param list a list of entities selected
+     * @param clearList true clears the selectionHelper, false keeps it intact
+     */
+    private void changeSelection(List<Entity> list, boolean clearList){
+
+        if(clearList){
+            selectionHelper.clearSelectedList();
+        }
+
+        for (int i = 0; i < list.size(); i++) {
+
+            Entity entity = list.get(i);
+            SelectEntityCommand cmdSelect =
+                new SelectEntityCommand(model, entity, true);
+            controller.execute(cmdSelect);
+
+        }
+    }
+
+    /**
+     * Calls the SelectEntityCommand for the new selected entity, or entities
+     * @param list a list of entities selected
+     * @param clearList true clears the selectionHelper, false keeps it intact
+     */
+    private void changeSelection(List<Entity> selectList, List<Entity> unselectList){
+
+        // unselection list
+        for (int i = 0; i < unselectList.size(); i++) {
+            Entity entity = unselectList.get(i);
+            SelectEntityCommand cmdSelect =
+                new SelectEntityCommand(model, entity, false);
+            controller.execute(cmdSelect);
+        }
+
+        // selection list
+        for (int i = 0; i < selectList.size(); i++) {
+            Entity entity = selectList.get(i);
+            SelectEntityCommand cmdSelect =
+                new SelectEntityCommand(model, entity, true);
+            controller.execute(cmdSelect);
+        }
+    }
+
+    /**
+     * Initialize the background
+     *
+     * @param backgroundColor The color value
+     */
+    private void configBackground(float[] backgroundColor) {
+
+        if ((backgroundColor == null) || (backgroundColor.length < 3)) {
+            backgroundColorArray = DEFAULT_BACKGROUND_COLOR;
+        } else {
+            backgroundColorArray = backgroundColor;
+        }
+        configBackground = true;
+    }
+
+    /**
+     * Convert the argument from world coordinates to
+     * zone relative coordinates in the active editing zone.
+     *
+     * @param point A position in world coordinates
+     */
+    private void toZoneRelative(Point3f point) {
+
+        AV3DEntityWrapper wrapper =
+            wrapperMap.get(activeZoneEntity.getEntityID());
+
+        // transform the position to be relative to
+        // the zone's coordinate system
+        tu.getLocalToVworld(wrapper.transformGroup, mtx);
+        mtx.invert();
+        mtx.transform(point);
+    }
+
+    /**
+     * Checks tolerance for both the intersection and merge functions of the segments
+     * The first if check , determines the distance between the segment and the mouse position
+     * The second check determines the distance between the mouse and vertex
+     */
+    private boolean withinTolerance(double[] position, Entity checkAgainst){
+
+        boolean result = false;
+        double[] checkAgainstPosition = new double[3];
+        float tolerance = .15f;
+        if (checkAgainst instanceof SegmentEntity){
+
+            double[] startVertexPos = new double[3];
+            double[] endVertexPos = new double[3];
+            VertexEntity startVertex = ((SegmentEntity)checkAgainst).getStartVertexEntity();
+            VertexEntity endVertex = ((SegmentEntity)checkAgainst).getEndVertexEntity();
+
+            if ((startVertex == null) || (endVertex == null)) {
+                return false;
+            }
+
+            startVertex.getPosition(startVertexPos);
+            endVertex.getPosition(endVertexPos);
+
+            double distanceBetweenMouseAndStartX = position[0] - startVertexPos[0];
+            double distanceBeTweenMouseAndStartY = position[1] - startVertexPos[1];
+            double deltaX = endVertexPos[0] - startVertexPos[0];
+            double deltaY = endVertexPos[1] - startVertexPos[1];
+
+            double dot = distanceBetweenMouseAndStartX * deltaX
+                    + distanceBeTweenMouseAndStartY * deltaY;
+            double len_sq = deltaX * deltaX + deltaY * deltaY;
+            double param = dot / len_sq;
+
+            double newX, newY;
+            if (param < 0) {
+                newX = startVertexPos[0];
+                newY = startVertexPos[1];
+            } else if (param > 1) {
+                newX = endVertexPos[0];
+                newY = endVertexPos[1];
+            } else {
+                newX = startVertexPos[0] + param * deltaX;
+                newY = startVertexPos[1] + param * deltaY;
+            }
+            double distance =Math.sqrt( ((position[0] - newX) * (position[0] - newX)) +
+                    ((position[1] - newY) * (position[1] - newY)) ) ;
+
+            result = (tolerance > distance);
+
+        } else if (checkAgainst instanceof PositionableEntity){
+            ((PositionableEntity)checkAgainst).getPosition(checkAgainstPosition);
+
+            //Distance equation equivalent of
+            //dist = sqrt((x2-x1)^2 + (y2-y1)^2 + (z2-z1)^2)
+            // no z used due to top down though
+            double xDelta = checkAgainstPosition[0] - position[0];
+            double yDelta = checkAgainstPosition[1] - position[1];
+            double distance = Math.sqrt((xDelta * xDelta) + (yDelta * yDelta));
+            result = (tolerance > distance);
+        }
+
+        return(result);
+    }
+
+    /**
+     * Used to reset the shadow entity and segment for ghosting
+     */
+    private void updateGhostSegment(Tool tool) {
+
+        double[] position = new double[3];
+        ArrayList<Command> cmdList = new ArrayList<Command>();
+        AxisAngle4f rot = new AxisAngle4f();
+        float[] rotation = new float[4];
+
+        if (tool == null )
+            return;
+
+        if (tool instanceof SegmentableTool) {
+
+            ////////////////////////////////////////////////////////////////
+            if (activeZoneEntity instanceof SegmentEntity) {
+                VertexEntity ve = ((SegmentEntity)activeZoneEntity).getStartVertexEntity();
+                ve.getPosition(position);
+                Vector3f right = new Vector3f();
+                right.set(ZoneOrientation.VERTICAL.right);
+                // scale it off the charts.....
+                right.scale(-1000);
+                position[0] += right.x;
+                position[1] += right.y;
+                position[2] += right.z;
+            }
+            ////////////////////////////////////////////////////////////////
+
+            // rotate the shadow to align with the active zone
+
+            if (trackerIsOver) {
+                position = shadowSegmentMousePosition;
+            }
+            rot.get(rotation);
+
+            int entityId =  model.issueEntityID();
+
+            // the shadow entity....
+            shadowEntity = (PositionableEntity)entityBuilder.createEntity(
+                model,
+                entityId,
+                position,
+                rotation,
+                ((SegmentableTool)tool).getVertexTool());
+
+            SegmentableEntity parent =
+                activeEntityManager.getSegmentableEntity();
+
+            shadowEntity.setProperty(
+                shadowEntity.getParamSheetName(),
+                Entity.SHADOW_ENTITY_FLAG,
+                true,
+                false);
+
+            ////////////////////////////////////////////////////////////////
+            shadowEntity.setStartingPosition(position);
+            ////////////////////////////////////////////////////////////////
+
+            ArrayList<VertexEntity> vertexList = parent.getVertices();
+            if ((vertexList != null) && (vertexList.size() > 0)) {
+
+                int startVertexID = -1;
+                VertexEntity startVertex = null;
+                int endVertexID = shadowEntity.getEntityID();
+
+                int vertexOrder = parent.getChildIndex(startVertexID);
+
+                ArrayList<Entity> selectedList = selectionHelper.getSelectedList();
+
+                if(selectedList.size() != 0  ) {
+                    for (int i = 0; i < selectedList.size(); i++) {
+                        Entity entity = selectedList.get(i);
+                        if (entity instanceof VertexEntity) {
+
+                            startVertexID = entity.getEntityID();
+                            startVertex = (VertexEntity)entity;
+                            break;
+
+                        } else if (entity instanceof SegmentEntity) {
+
+                            startVertex = ((SegmentEntity)entity).getEndVertexEntity();
+                            startVertexID = startVertex.getEntityID();
+
+
+                        }
+                    }
+                }
+
+                // handle the case where nothing is selected
+                if( startVertexID == -1) {
+                    startVertexID = parent.getEndVertexID();
+                    startVertex = parent.getVertex(startVertexID);
+                }
+
+                // if this is the first segment then we need to
+                // place the new after the first vertex
+                int firstVertexID = parent.getStartVertexID();
+                int lastVertexID = parent.getEndVertexID();
+
+                if (firstVertexID == startVertexID || lastVertexID == endVertexID) {
+                    vertexOrder++;
+                }
+
+                Command cmd = new AddVertexTransientCommand(
+                    parent,
+                    (VertexEntity) shadowEntity,
+                    vertexOrder);
+                cmd.setErrorReporter(errorReporter);
+
+                cmdList.add(cmd);
+
+                SegmentTool segmentTool =
+                    (SegmentTool)((SegmentableTool)tool).getSegmentTool();
+
+                shadowSegmentEntity =
+                    (SegmentEntity)entityBuilder.createEntity(
+                            model,
+                            model.issueEntityID(),
+                            position,
+                            rotation,
+                            segmentTool);
+
+                shadowSegmentEntity.setProperty(
+                    shadowEntity.getParamSheetName(),
+                    Entity.SHADOW_ENTITY_FLAG,
+                    true,
+                    false);
+
+                shadowSegmentStartVertexID = startVertex.getEntityID();
+                shadowVertexEntityID = shadowEntity.getEntityID();
+                shadowSegmentEntity.setStartVertex(startVertex);
+                shadowSegmentEntity.setEndVertex((VertexEntity)shadowEntity);
+
+                cmd = new AddSegmentTransientCommand(
+                    model,
+                    parent,
+                    (SegmentEntity) shadowSegmentEntity);
+                cmd.setErrorReporter(errorReporter);
+
+                cmdList.add(cmd);
+
+            } else {
+                // place the shadow somewhere remote
+                position = new double[]{-1000, 0, 0};
+                shadowEntity.setPosition(position, false);
+
+                Command cmd = new AddVertexTransientCommand(
+                    parent,
+                    (VertexEntity)shadowEntity,
+                    0);
+                cmd.setErrorReporter(errorReporter);
+
+                cmdList.add(cmd);
+
+                // the shadow is selected to show the selection box
+                cmd = new SelectEntityCommand(model, shadowEntity, true);
+                cmd.setErrorReporter(errorReporter);
+                cmdList.add(cmd);
+
+            }
+        }
+        MultiTransientCommand multiCmd =
+            new MultiTransientCommand(
+                    cmdList,
+                    "Shadow Segment -> " + shadowEntity.getEntityID());
+        multiCmd.setErrorReporter(errorReporter);
+
+        controller.execute(multiCmd);
+
+    }
+
+    void clearShadowEntities() {
+        if(shadowEntity != null) {
+
+            if(shadowEntity.getType() == Entity.TYPE_VERTEX) {
+                SegmentableEntity segmentableEntity = this.activeEntityManager.getSegmentableEntity();
+
+                RemoveVertexCommand removeVertexCommand =
+                    new RemoveVertexCommand(
+                            model,
+                            segmentableEntity,
+                            shadowEntity.getEntityID(),
+                            false);
+
+                RemoveSegmentCommand removeSegmentCommand  =
+                    new RemoveSegmentCommand(
+                            model,
+                            segmentableEntity,
+                            shadowSegmentEntity.getEntityID(),
+                            false);
+
+                ArrayList<Command> deleteShadowSegment = new ArrayList<Command>();
+                deleteShadowSegment.add(removeVertexCommand);
+                deleteShadowSegment.add(removeSegmentCommand);
+
+                MultiTransientCommand multi =
+                    new MultiTransientCommand(
+                            deleteShadowSegment,
+                            "Removing Entity -> " +shadowEntity.getEntityID());
+                multi.setErrorReporter(errorReporter);
+
+                controller.execute(multi);
+
+                shadowSegmentEntity = null;
+            }else {
+                Entity parent = model.getEntity(shadowEntity.getParentEntityID());
+
+                RemoveEntityChildCommand removeEntityCommand =
+                    new RemoveEntityChildCommand(model, parent, shadowEntity, false);
+                removeEntityCommand.setErrorReporter(errorReporter);
+                controller.execute(removeEntityCommand);
+
+            }
+            shadowEntity = null;
+            shadowMoveInProgress = false;
+            shadowIsVisible = false;
+        }
+    }
+
+    /**
+     * Returns the map of EntityWrappers
+     * @return
+     */
+    HashMap<Integer, AV3DEntityWrapper> getWrapperMap(){
+        return wrapperMap;
+    }
+
+    /**
+     * Walk through the children of the argument entity,
+     * adding listeners as necessary.
+     *
+     * @param entity The entity to start with
+     */
+    private void recursiveAdd(Entity entity) {
+
+        entity.addEntityChildListener(this);
+        entity.addEntitySelectionListener(this);
+
+        entityMap.put(entity.getEntityID(), entity);
+
+        if (entity.hasChildren()) {
+            ArrayList<Entity> childList = entity.getChildren();
+            for (int i = 0; i < childList.size(); i++) {
+                Entity child = childList.get(i);
+                recursiveAdd(child);
+            }
+        }
+    }
+
+    /**
+     * Walk through the children of the argument entity,
+     * removing listeners as necessary.
+     *
+     * @param entity The entity to start with
+     */
+    private void recursiveRemove(Entity entity) {
+
+        entity.removeEntityChildListener(this);
+        entity.removeEntitySelectionListener(this);
+
+        entityMap.remove(entity.getEntityID());
+
+        if (entity.hasChildren()) {
+            ArrayList<Entity> childList = entity.getChildren();
+            for (int i = 0; i < childList.size(); i++) {
+                Entity child = childList.get(i);
+                recursiveRemove(child);
+            }
+        }
+    }
+
+    /**
+     * Get the zoom amount from ZoneView.
+     *
+     * @return double zoom amount
+     */
+    double getZoneViewZoom(){
+
+        return zoneView.getZoomAmount();
+    }
+
+    /**
+     * Set the bogus shadow property
+     */
+    void setShadowState(Entity entity, boolean state) {
+        entity.setProperty(
+            entity.getParamSheetName(),
+            Entity.SHADOW_ENTITY_FLAG,
+            state,
+            false);
+        if (entity.hasChildren()) {
+            ArrayList<Entity> children = entity.getChildren();
+            for (int i = 0; i < children.size(); i++) {
+                Entity child = children.get(i);
+                setShadowState(child, state);
+            }
+        }
+    }
+}

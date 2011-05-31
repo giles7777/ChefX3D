@@ -1,0 +1,85 @@
+<html>
+<head>
+<title>ChefX3D - System Architecture</title>
+</head>
+
+<body>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+</center>
+
+<h1 align=center>System Architecture</h1>
+
+<p>
+This toolkit is designed to make writing content specific editing tools easy.  It should
+be UI toolkit agnostic and likely will contain both Swing and SWT implementations.
+</p>
+
+<hr/>
+
+Major concepts in the design:
+
+<p>
+Concept Definitions:
+</P>
+<ul>
+   <li><a href="tool.html">Tool</A> - An authoring tool</li>
+      <ul><li>Tool Descriptor - Outside description of a tool</li>
+          <li>Tool Group - A grouping of tools</li>
+      </ul>
+   <li>Entity - An instance of an authoring tool and a set of properties</li>
+   <li>Classification level - The classification of a tool(security, license, cost)</li>
+      <ul><li>Just need an integer for each string</li>
+          <li>Have an icon for each displayable on the toolbar</li>
+      </ul>
+</ul>
+Components:
+<ul>
+   <li><a href="model.html">World Model</a> - The collection of current entities</li>
+   <li><a href="property_editor.html">Property Editor</a> - an editor of entity properties</li>
+   <li>Toolbar - A collection of tools and a method to select them</li>
+   <li><a href="view.html">View</a> - A view onto the model.  Authoring operations can be performed on this view.</li>
+   <li><a href="importer.html">Importer</A> - Populates the model with entities from some source</li>
+   <li><a href="exporter.html">Exporter</A> - Writes out the entities to some format</li>
+</ul>
+
+<h2>Customization</h2>
+
+Ways the user can customize:
+<ul>
+   <li>What tools are provided and their naming/icons</li>
+   <li>Layout of the editor components</li>
+   <li>Implementation of Toolbar, View, Property Editor and Model</li>
+   <li>Project specific conversion of model data into file formats</li>
+</ul>
+
+<h2>User Interface</h2>
+The library should provide a reasonable implementation for all required pieces.  The
+average project should not need to replace these.  Some control over look and feel should be
+provided to make it possible for most projects to use these implementations.
+
+<p>
+Default implementations for:
+<ul>
+   <li>View(2D, 3D)</li>
+   <li>Toolbar</li>
+   <li>Property Editor</li>
+</ul>
+</p>
+
+
+<hr>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+<br>
+<i>Last Updated: $Date: 2007/03/14 15:58:25 $<br>
+Version: $Revision: 1.1 $</I>
+</center>
+
+</body>
+</html>

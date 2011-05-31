@@ -1,0 +1,263 @@
+<?xml version="1.0" standalone="yes"?>
+
+<project basedir="." default="compile" name="ChefX3D">
+   	<import file="build_common.xml" />
+  
+   	<description></description>
+
+   	<property name="version" value="3.0.0" />    
+   	<property name="src.dir" value="${basedir}/src"/>
+   	<property name="release.dir" value="${basedir}/release"/>
+   	<property name="test.dir" value="${basedir}/test/junit"/>
+   	<property name="classes.dir" value="${basedir}/classes" />
+   	<property name="jar.dir" value="${basedir}/jars" />
+   	<property name="lib.dir" value="${basedir}/lib"/>
+   	<property name="manifest.dir" value="${basedir}/make/manifest"/>
+   	<property name="javadocs.dir" value="${basedir}/docs/javadoc"/>
+
+   	<property name="entrypoint" value="emerson.closetmaid.ClosetmaidEditor" />
+
+   	<property name="runarg0" value="-Xmx768m"/>
+   	<property name="runarg1" value="-Dsun.java2d.noddraw=true"/>
+   	<property name="runarg2" value="-Djava.library.path=&quot;./natives/${os.name}/${os.arch}&quot;" />
+
+   	<property name="jvmrunargs" value="${runarg0} ${runarg1} ${runarg2}"/>
+
+   	<taskdef resource="checkstyletask.properties" classpath="${lib.dir}/checkstyle-all-5.1.jar"/>
+         
+  	<target name="build" 
+     	description="Complete clean, setup, compilation, run" 
+     	depends="clean,init,compile,config,images,shaders" />
+
+  	<!-- Create destination directories -->
+  	<target name="init" description="Create destination directories">
+   		<mkdir dir="${classes.dir}"/>
+   		<mkdir dir="${javadocs.dir}"/>
+  	</target>
+  
+  	<target name="compile" depends="init" description="Compile all Java source files">
+	<compilejava package="org/chefx3d"
+	    jars="" />	    
+	<compilejava package="org/chefx3d/util"
+	    jars="vecmath.jar j3d-org-all.0.9.0.jar aviatrix3d-all_2.1.0.jar uri.jar" />
+	<compilejava package="org/chefx3d/ui"
+	    jars="j3d-org-all_0.9.0.jar uri.jar xj3d-core_2.0.0.jar" />
+	<compilejava package="org/chefx3d/model"
+	    jars="vecmath.jar smack.jar smackx.jar xj3d-sai_2.0.0.jar j3d-org-all_0.9.0.jar xj3d-sav_2.0.0.jar" 
+	    />
+	<compilejava package="org/chefx3d/rules/properties"
+	    jars="" />
+	<compilejava package="org/chefx3d/tool"
+	    jars="j3d-org-all_0.9.0.jar aviatrix3d-all_2.1.0.jar" />
+	<compilejava package="org/chefx3d/catalog"
+	    jars="j3d-org-all_0.9.0.jar" />
+	<compilejava package="org/chefx3d/cache/event"
+	    jars="joal.jar jogl.jar vecmath.jar j3d-org-all_0.9.0.jar aviatrix3d-all_2.1.0.jar chefx3d_all_3.0.0.jar" />
+	<compilejava package="org/chefx3d/cache"
+	    jars="joal.jar jogl.jar vecmath.jar j3d-org-all_0.9.0.jar aviatrix3d-all_2.1.0.jar chefx3d_all_3.0.0.jar uri.jar vlc_uri.jar" />
+	<compilejava package="org/chefx3d/cache/loader"
+	    jars="j3d-org-all_0.9.0.jar" />
+	<compilejava package="org/chefx3d/cache/content"
+	    jars="joal.jar jogl.jar vecmath.jar j3d-org-all_0.9.0.jar aviatrix3d-all_2.1.0.jar chefx3d_all_3.0.0.jar uri.jar vlc_uri.jar" />
+	<compilejava package="org/chefx3d/cache/protocol"
+	    jars="joal.jar jogl.jar vecmath.jar j3d-org-all_0.9.0.jar aviatrix3d-all_2.1.0.jar chefx3d_all_3.0.0.jar uri.jar vlc_uri.jar" />
+	<compilejava package="org/chefx3d/cache/javanet/protocol/http"
+	    jars="joal.jar jogl.jar vecmath.jar j3d-org-all_0.9.0.jar aviatrix3d-all_2.1.0.jar chefx3d_all_3.0.0.jar uri.jar vlc_uri.jar httpclient.jar" />
+	<compilejava package="org/chefx3d/cache/javanet/protocol/https"
+	    jars="uri.jar vlc_uri.jar httpclient.jar" />
+	<compilejava package="org/chefx3d/cache/protocol/http"
+	    jars="joal.jar jogl.jar vecmath.jar j3d-org-all_0.9.0.jar aviatrix3d-all_2.1.0.jar chefx3d_all_3.0.0.jar uri.jar vlc_uri.jar httpclient.jar" />
+	<compilejava package="org/chefx3d/cache/protocol/https"
+	    jars="joal.jar jogl.jar vecmath.jar j3d-org-all_0.9.0.jar aviatrix3d-all_2.1.0.jar chefx3d_all_3.0.0.jar uri.jar vlc_uri.jar httpclient.jar" />
+	<compilejava package="org/chefx3d/cache/protocol/jar"
+	    jars="joal.jar jogl.jar vecmath.jar j3d-org-all_0.9.0.jar aviatrix3d-all_2.1.0.jar chefx3d_all_3.0.0.jar uri.jar vlc_uri.jar httpclient.jar" />
+	<compilejava package="org/chefx3d/toolbar"
+	    jars="" />
+	<compilejava package="org/chefx3d/view"
+	    jars="xj3d-sai_2.0.0.jar xj3d-core_2.0.0.jar" />
+	<compilejava package="org/chefx3d/property"
+	    jars="xj3d-core_2.0.0.jar" />
+	<compilejava package="org/chefx3d/property/awt"
+	    jars="xj3d-core_2.0.0.jar j3d-org-all_0.9.0.jar" />
+	<compilejava package="org/chefx3d/toolbar/awt"
+	    jars="l2fprod-common-outlookbar.jar j3d-org-all_0.9.0.jar uri.jar" />
+	<compilejava package="org/chefx3d/view/awt"
+	    jars="xj3d-sai-concrete_2.0.0.jar xj3d-sai_2.0.0.jar xj3d-external-sai_2.0.0.jar xj3d-core_2.0.0.jar gt2-main-2.3.1.jar gt2-api-2.3.1.jar jts-1.7.1.jar geoapi-nogenerics-2.1-M2.jar gt2-render-2.3.1.jar gt2-image-2.3.1.jar gt2-referencing-2.3.1.jar gt2-imagemosaic-2.3.1.jar gt2-imagepyramid-2.3.1.jar jai_core.jar vecmath.jar aviatrix3d-all_2.1.0.jar" />
+	<compilejava package="org/chefx3d/actions/awt"
+	    jars="vecmath.jar j3d-org-all_0.9.0.jar" />
+	<compilejava package="org/chefx3d/view/awt/entitytree"
+	    jars="j3d-org-all_0.9.0.jar" />
+	<compilejava package="org/chefx3d/view/awt/scenemanager"
+	    jars="aviatrix3d-all_2.1.0.jar j3d-org-all_0.9.0.jar vecmath.jar" />
+	<compilejava package="org/chefx3d/view/awt/av3d"
+	    jars="jogl.jar aviatrix3d-all_2.1.0.jar xj3d-core_2.0.0.jar xj3d-parser_2.0.0.jar xj3d-sav_2.0.0.jar j3d-org-all_0.9.0.jar uri.jar vlc_uri.jar vecmath.jar" />
+	<compilejava package="org/chefx3d/view/swt"
+	    jars="xj3d-sai_2.0.0.jar xj3d-core_2.0.0.jar" />
+	<compilejava package="org/chefx3d/view/net"
+	    jars="" />
+	<compilejava package="org/chefx3d/view/net/xmpp"
+	    jars="smack.jar smackx.jar smackx-debug.jar" />
+	<compilejava package="org/chefx3d/toolbar/swt"
+	    jars="" />
+	<compilejava package="org/chefx3d/property/swt"
+	    jars="xj3d-core_2.0.0.jar" />
+	<compilejava package="org/chefx3d/catalog/util"
+	    jars="j3d-org-all_0.9.0.jar xj3d-sai_2.0.0.jar xj3d-common_2.0.0.jar xj3d-ogl_2.0.0.jar xj3d-sai-concrete_2.0.0.jar xj3d-core_2.0.0.jar gt2-imagepyramid-2.4.4.jar gt2-imagemosiac-2.4.4.jar jai_core.jar aviatrix3d-all_2.1.0.jar" 
+	    excludes="org/chefx3d/catalog/util/X3DSceneTiler.java" />
+	<compilejava package="org/chefx3d/catalog/util/awt"
+	    jars="xj3d-sai_2.0.0.jar xj3d-ogl_2.0.0.jar xj3d-sai-concrete_2.0.0.jar org.jeospace.base_1.2.0.jar" />
+	<compilejava package="org/chefx3d/rules/util"
+	    jars="" />	    
+	<compilejava package="org/chefx3d/rules/definitions"
+	    jars="vecmath.jar j3d-org-all_0.9.0.jar" />
+	<compilejava package="org/chefx3d/rules/engines"
+	    jars="" />
+	<compilejava package="org/chefx3d/rules/interpreters"
+	    jars="" />
+	<compilejava package="org/chefx3d/rules/controller"
+	    jars="" />
+	<compilejava package="org/chefx3d/rules/catalog"
+	    jars="chefx3d_all_3.0.0.jar" />
+	    
+  	</target>
+  
+  	<target name="config" description="Copy config files">
+     	<extras package="config/i18n" excludes="closetmaidResources_en.properties" />
+     	<extras package="config/model" />
+     	<extras package="config/view/av3d" />
+  	</target>
+
+  	<target name="images" description="Copy image files">
+     	<extras package="images/2d" />
+     	<extras package="images/shading" />
+  	</target>
+
+  	<target name="shaders" description="Copy image files">
+     	<extras package="glsl/preview" />
+     	<extras package="glsl/lineart" />
+  	</target>
+
+  	<target name="compileTest" depends="init" description="Compile all Test source files">
+     	<compilejava srcdir="${test.dir}" package="emerson/closetmaid" jars="junit-4.8.1.jar vecmath.jar sda_common_${version}.jar chefx3d_all_3.0.0.jar" />
+     	<compilejava srcdir="${test.dir}" package="emerson/closetmaid/catalog" jars="junit-4.8.1.jar vecmath.jar sda_common_${version}.jar chefx3d_all_3.0.0.jar" />
+     	<compilejava srcdir="${test.dir}" package="emerson/closetmaid/rules" jars="junit-4.8.1.jar vecmath.jar sda_common_${version}.jar chefx3d_all_3.0.0.jar" />
+     	<compilejava srcdir="${test.dir}" package="emerson/closetmaid/location" jars="junit-4.8.1.jar vecmath.jar sda_common_${version}.jar chefx3d_all_3.0.0.jar" />
+     	<compilejava srcdir="${test.dir}" package="" jars="junit-4.8.1.jar" />
+  	</target>
+  
+  	<target name="javadoc" description="Generates javadoc" depends="compile">
+    	<echo message="Generating javadoc..." />
+    	<javadoc sourcepath="${src.dir}/java" 
+            destdir="${javadocs.dir}" 
+            packagenames="*"
+            version="true"
+            author="yes">
+    	</javadoc>
+  	</target>
+  
+  
+  	<target name="jar" depends="compile,config,images,shaders">
+<createjar name="chefx3d_all"
+    version="${version}"
+    manifest="chefx3d_all.mf"
+    includes="        org/chefx3d/*
+        org/chefx3d/tool/*
+        org/chefx3d/toolbar/*
+        org/chefx3d/toolbar/awt/*
+        org/chefx3d/view/*
+        org/chefx3d/view/awt/*
+        org/chefx3d/view/awt/entitytree/*
+        org/chefx3d/view/awt/scenemanager/*
+        org/chefx3d/view/awt/av3d/*
+        org/chefx3d/view/net/*
+        org/chefx3d/view/net/xmpp/*
+        org/chefx3d/property/*
+        org/chefx3d/property/awt/*
+        org/chefx3d/util/*
+        org/chefx3d/model/*
+        org/chefx3d/rules/util/*
+        org/chefx3d/rules/controller/*
+        org/chefx3d/rules/definitions/*
+        org/chefx3d/rules/engines/*
+        org/chefx3d/rules/interpreters/*
+    	org/chefx3d/rules/properties/*
+    	org/chefx3d/rules/properties/accessors/*
+        org/chefx3d/rules/catalog/*
+        org/chefx3d/catalog/*
+        org/chefx3d/cache/*
+        org/chefx3d/cache/loader/*
+        org/chefx3d/cache/content/*
+        org/chefx3d/cache/event/*
+        org/chefx3d/cache/javanet/protocol/http/*
+        org/chefx3d/cache/javanet/protocol/https/*
+        org/chefx3d/cache/protocol/*
+        org/chefx3d/cache/protocol/http/*
+        org/chefx3d/cache/protocol/https/*
+        org/chefx3d/cache/protocol/jar/*
+        org/chefx3d/catalog/util/*
+        org/chefx3d/catalog/util/awt/*
+        org/chefx3d/actions/awt/*
+        images/2d/*
+        images/shading/*
+        config/i18n/*
+        config/view/av3d/*
+        org/chefx3d/ui/*
+        glsl/preview/*
+        glsl/lineart/*
+" />
+<createjar name="chefx3d_core"
+    version="${version}"
+    manifest="chefx3d_core.mf"
+    includes="        org/chefx3d/*
+        org/chefx3d/tool/*
+        org/chefx3d/toolbar/*
+        org/chefx3d/view/*
+        org/chefx3d/util/*
+        org/chefx3d/model/*
+        org/chefx3d/catalog/*
+        org/chefx3d/catalog/util/*
+        config/i18n/*
+" />
+  	</target>
+  
+  	<target name="cleanCache">
+     	<echo message="deleting ${user.home}/AppData/Local/Emerson_ClosetMaid_VDST" />
+     	<delete verbose="true" includeEmptyDirs="true">
+        	<fileset dir="${user.home}/AppData/Local/Emerson_ClosetMaid_VDST" includes="**/*" />
+     	</delete>
+  	</target>
+  
+  	<target name="test" depends="compileTest">
+    	<junit printsummary="yes" haltonerror="no" haltonfailure="no" fork="yes" showoutput="false">
+	      	<jvmarg line="${jvmrunargs}"/>
+	    
+	      	<formatter type="plain" usefile="false"/>
+	      	<batchtest fork="yes" >
+		    	<fileset dir="${test.dir}">
+		      		<include name="**/*Test.java"/>
+		      		<exclude name="**/TestAll.java"/>
+		    	</fileset>
+	     	</batchtest>
+	      
+	      	<classpath>
+	         	<pathelement path="${classes.dir}" />
+	         	<fileset dir="${lib.dir}" includes="**/*.jar" excludes="sda_common_debug_${version}.jar" />   
+	         	<fileset dir="natives/${os.name}/${os.arch}" includes="**/*.jar" />         
+	      	</classpath>
+		</junit>
+  	</target>
+  
+  	<target name="clean" description="Deletes all the generated artifacts.">
+    	<delete dir="${javadocs.dir}" />
+    	<delete dir="${classes.dir}" />
+  	</target>
+		 	
+	<target name="checkstyle" description="Check coding style">
+		<checkstyle config="docs/yumetech_codestyle.xml">
+		  <fileset dir="${src.dir}" includes="**/*.java"/>
+		  <formatter type="plain"/>
+		  <formatter type="xml" toFile="checkstyle_errors.xml"/>
+		</checkstyle>   
+	</target>	 		
+</project>
+

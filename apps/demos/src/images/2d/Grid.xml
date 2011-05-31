@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Mapping>
+    <Mapping2DTo3D xpos="-8" xfactor="0.03125" ypos="-8" yfactor="0.03125" swap="FALSE"/>
+    <PhysicalSize width="16" length="16" />
+</Mapping>

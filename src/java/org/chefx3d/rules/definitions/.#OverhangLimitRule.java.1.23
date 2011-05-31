@@ -1,0 +1,953 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+import java.util.ArrayList;
+
+//Internal Imports
+import org.chefx3d.model.*;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+
+/**
+ * This class determines if a object with a proper overhang value
+ * is over hanging to much. If so it resets the object.
+ * @author jonhubba
+ * @version $Revision: 1.23 $
+ */
+public class OverhangLimitRule extends Rule{
+
+    /** Pop up message when illegal bounds exists for place */
+    private static final String ADD_FAIL_PROP =
+        "org.chefx3d.rules.definitions.OverHangLimitRule.addPopup";
+
+    /** Pop up message when illegal bounds exists for place */
+    private static final String SCALE_FAIL_PROP =
+        "org.chefx3d.rules.definitions.OverHangLimitRule.scalePopup";
+
+    /** Pop up message when illegal bounds exists for place */
+    private static final String MOVE_FAIL_PROP =
+        "org.chefx3d.rules.definitions.OverHangLimitRule.movePopup";
+
+    /** Static class instance */
+    private static OverhangLimitRule rule = new OverhangLimitRule();
+
+    private OverhangLimitRule(){
+        ruleType = RULE_TYPE.STANDARD;
+    }
+
+    /**
+     * Return class instance
+     * @return CanRotateRule
+     */
+    public static OverhangLimitRule getInstance(){
+        return rule;
+    }
+
+    @Override
+    protected boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command) {
+
+        // does the item have an overhang limit
+        Boolean checkOverHang =
+            (Boolean)RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.RESPECTS_OVERHANG_LIMIT);
+
+        boolean overhangValid = true;
+        if (checkOverHang) {
+            overhangValid = checkOverhangLimit(model, command, entity, null, true);
+        }
+
+        return overhangValid;
+
+    }
+
+    /**
+     * Uses cumaltive bounds logic to get the extents of  colliding items
+     * Then determines if the bounds of the entity minus the bounds of
+     * the colliding obj ( usually a standard) are under the overhang limit.
+     * @param model
+     * @param command
+     * @param entity
+     */
+    protected boolean checkOverhangLimit (
+            WorldModel model,
+            Command command,
+            Entity entity,
+            int[] ignoreEntityIdList,
+            boolean resetCommand) {
+
+        // check for collisions
+        performCollisionCheck(command);
+
+        // do the analysis
+        performCollisionAnalysisHelper(
+                entity, null, false, ignoreEntityIdList, true);
+
+        // see if there are aany illegal collisions
+        boolean illegalCollisions = hasIllegalCollisionHelper(entity);
+
+System.out.println("here");
+        /*
+         * Handle the > 1 collision and == 1 collision cases here, handing off
+         * the gen pos calculation to the specific routines for appropriate
+         * processing.
+         */
+        if (entityMatches.size() >= 1 &&
+                !illegalCollisions &&
+                zoneEntityMatches.size() == 0 &&
+                wallEntityMatches.size() <= 1) {
+
+            Float overHangLimit =
+                (Float)RulePropertyAccessor.getRulePropertyValue(
+                        entity,
+                        ChefX3DRuleProperties.OVERHANG_LIMIT);
+
+            Float overHangMinimum =
+                (Float)RulePropertyAccessor.getRulePropertyValue(
+                        entity,
+                        ChefX3DRuleProperties.OVERHANG_MINIMUM);
+
+            // Calculate the multi collision bounds and center
+            // The bounds is based on the minimum exterior bounds along the
+            // + and - directions of all axis.
+            float[] multiBounds = null;
+System.out.println("size: " + collisionEntities.size());
+
+            for (int i=0; i < collisionEntities.size(); i++) {
+
+                Entity tmpEntity = collisionEntities.get(i);
+
+                if (isEntityChildOfParent(model, tmpEntity, entity)) {
+                    continue;
+                }
+
+                if (tmpEntity instanceof PositionableEntity) {
+
+                    // Extract the bounds of the indexed collision entity
+                    float[] tmpBounds = new float[6];
+                    double[] tmpPos = new double[3];
+                    double[] currentPos = new double[3];
+
+                    ((PositionableEntity)tmpEntity).getPosition(currentPos);
+
+                    // if there are commands on the stack that are moving the
+                    // entity, we need to use this moved position for the
+                    // intersection point
+                    ArrayList<Command> list = getNewlyIssuedCommandsFullHistory();
+                    int len = list.size();
+                    for (int w = len - 1; w >= 0 ; w--) {
+
+                        Command cmd = list.get(w);
+
+                        if (cmd instanceof MoveEntityCommand) {
+
+                            Entity adjEntity = ((MoveEntityCommand)cmd).getEntity();
+
+                            if (adjEntity == tmpEntity) {
+                                double[] movePos = new double[3];
+                                ((MoveEntityCommand)cmd).getEndPosition(movePos);
+                                ((PositionableEntity)tmpEntity).setPosition(movePos, false);
+                            }
+                        }
+                    }
+
+                    ((PositionableEntity)tmpEntity).getBounds(tmpBounds);
+
+                    // Get the parent zone entity of the collision entity.
+                    // If not found, return false
+                    Entity tmpParentEntity =
+                        getParentZoneEntity(model, tmpEntity);
+
+
+                    // We want the position of the collision entity relative
+                    // to its zone
+                    tmpPos =
+                        getRelativePosition(
+                                model,
+                                tmpEntity,
+                                tmpParentEntity,
+                                false);
+
+                    // Set the current position back
+                    ((PositionableEntity) tmpEntity).setPosition(currentPos, false);
+
+                    if (multiBounds == null) {
+
+                        multiBounds = new float[6];
+                        multiBounds[0] = (float)tmpPos[0] + tmpBounds[0];
+                        multiBounds[1] = (float)tmpPos[0] + tmpBounds[1];
+                        multiBounds[2] = (float)tmpPos[1] + tmpBounds[2];
+                        multiBounds[3] = (float)tmpPos[1] + tmpBounds[3];
+                        multiBounds[4] = (float)tmpPos[2] + tmpBounds[4];
+                        multiBounds[5] = (float)tmpPos[2] + tmpBounds[5];
+
+                    } else {
+
+                        multiBounds[0] = Math.min(
+                                ((float)tmpPos[0] + tmpBounds[0]),
+                                multiBounds[0]);
+
+                        multiBounds[1] = Math.max(
+                                ((float)tmpPos[0] + tmpBounds[1]),
+                                multiBounds[1]);
+
+                        multiBounds[2] = Math.min(
+                                ((float)tmpPos[1] + tmpBounds[2]),
+                                multiBounds[2]);
+
+                        multiBounds[3] = Math.max(
+                                ((float)tmpPos[1] + tmpBounds[3]),
+                                multiBounds[3]);
+
+                        multiBounds[4] = Math.min(
+                                ((float)tmpPos[2] + tmpBounds[4]),
+                                multiBounds[4]);
+
+                        multiBounds[5] = Math.max(
+                                ((float)tmpPos[2] + tmpBounds[5]),
+                                multiBounds[5]);
+
+                    }
+                }
+            }
+
+
+            float[] entityBounds = new float[6];
+            float[] entityExtents = new float[6];
+            double[] entityPos = new double[3];
+            ((PositionableEntity)entity).getBounds(entityBounds);
+            ((PositionableEntity)entity).getPosition(entityPos);
+
+            // The entity does not have its  parent set if it is an add command
+            // To get a proper relative position we need to set the parent ID
+            // Then set it back to -1 when done with the position.
+            if (command instanceof AddEntityChildCommand) {
+                entity.setParentEntityID(
+                        ((AddEntityChildCommand)command).getParentEntity().getEntityID());
+            } else if (command instanceof MoveEntityTransientCommand) {
+                ((MoveEntityTransientCommand)command).getPosition(entityPos);
+            } else if (command instanceof TransitionEntityChildCommand) {
+                ((TransitionEntityChildCommand)command).getEndPosition(entityPos);
+            }
+
+            Entity tmpParentEntity =
+                getParentZoneEntity(model, entity);
+
+            entityPos =
+                getRelativePosition(
+                        model,
+                        entity,
+                        tmpParentEntity,
+                        false);
+
+            if(command instanceof AddEntityChildCommand) {
+                entity.setParentEntityID(-1);
+            }
+System.out.println("here2");
+            entityExtents[0] = (float) entityPos[0] + entityBounds[0];
+            entityExtents[1] = (float) entityPos[0] + entityBounds[1];
+            entityExtents[2] = (float) entityPos[1] + entityBounds[2];
+            entityExtents[3] = (float) entityPos[1] + entityBounds[3];
+            entityExtents[4] = (float) entityPos[2] + entityBounds[4];
+            entityExtents[5] = (float) entityPos[2] + entityBounds[5];
+
+
+            // check for bounds X AXIS only
+            if((multiBounds[0] - entityExtents[0]) > overHangLimit ||
+                    (entityExtents[1] - multiBounds[1]) > overHangLimit ||
+                    (multiBounds[0] - entityExtents[0]) < overHangMinimum ||
+                    (entityExtents[1] - multiBounds[1]) < overHangMinimum) {
+
+                resetCommand = false;
+
+                if (overHangLimit == 0.0f && overHangMinimum == -0.001f) {
+                    if(!attemptScaleChange(
+                            model,
+                            entity,
+                            command,
+                            overHangMinimum)) {
+
+                        resetCommand = true;
+                    } else {
+                        return true;
+                    }
+                }
+
+
+//System.out.println("*************************************************");
+//System.out.println("command: " + command);
+//System.out.println("multiBounds[0]: " + multiBounds[0]);
+//System.out.println("multiBounds[1]: " + multiBounds[1]);
+//System.out.println("entityExtents[0] : " + entityExtents[0]);
+//System.out.println("entityExtents[1] : " + entityExtents[1]);
+//System.out.println("overHangLimit: " + overHangLimit);
+//System.out.println("overHangMinimum: " + overHangMinimum);
+//System.out.println("resetCommand: " + resetCommand);
+//System.out.println("-------------------------------------------------");
+//System.out.println((multiBounds[0] - entityExtents[0]) + " > " + overHangLimit);
+//System.out.println((entityExtents[1] - multiBounds[1]) + " > " + overHangLimit);
+//System.out.println((multiBounds[0] - entityExtents[0]) + " < " + overHangMinimum);
+//System.out.println((entityExtents[1] - multiBounds[1]) + " < " + overHangMinimum);
+//System.out.println();
+
+System.out.println("here3: " + resetCommand);
+                if (resetCommand) {
+
+                    if(command instanceof ScaleEntityCommand||
+                            command instanceof ScaleEntityTransientCommand) {
+
+                        revertScaleCommand(command);
+
+                    } else if (command instanceof MoveEntityCommand||
+                            command instanceof MoveEntityTransientCommand) {
+                        revertMoveCommand(command);
+
+                    } else if (command instanceof TransitionEntityChildCommand) {
+
+                        revertTransitionEntityChildCommand(command);
+
+                    } else if ( command instanceof AddEntityChildCommand) {
+
+                        String failInfo = this.intl_mgr.getString(SCALE_FAIL_PROP);
+                        popUpMessage.showMessage(failInfo);
+                        return false;
+
+                    }
+
+                }
+
+                return false;
+
+            }
+
+        }
+
+        return true;
+
+    }
+
+    /**
+     * Reverts the scale command back to previous position and scale
+     * @param command - command to revert
+     */
+   public void revertScaleCommand(Command command) {
+
+       String failInfo = this.intl_mgr.getString(SCALE_FAIL_PROP);
+
+       if (command instanceof ScaleEntityCommand) {
+
+           ScaleEntityCommand sECommand = ((ScaleEntityCommand)command);
+
+           sECommand.resetToStart();
+           popUpMessage.showMessage(failInfo);
+
+       } else if (command instanceof ScaleEntityTransientCommand) {
+
+           statusBar.setMessage(failInfo);
+
+       }
+
+   }
+
+   /**
+    * Reverts the move command back to previous position
+    * @param command - command to revert
+    */
+   public void revertMoveCommand(Command command) {
+
+       String failInfo = intl_mgr.getString(MOVE_FAIL_PROP);
+
+       if (command instanceof MoveEntityCommand) {
+
+           MoveEntityCommand sECommand = ((MoveEntityCommand)command);
+
+           sECommand.resetToStart();
+           popUpMessage.showMessage(failInfo);
+
+       } else if (command instanceof MoveEntityTransientCommand) {
+
+           statusBar.setMessage(failInfo);
+
+       }
+
+   }
+
+   /**
+    * Reverts the move command back to previous position
+    * @param command - command to revert
+    */
+   public void revertTransitionEntityChildCommand(Command command) {
+
+       String failInfo = intl_mgr.getString(MOVE_FAIL_PROP);
+
+       if (command instanceof TransitionEntityChildCommand &&
+               !command.isTransient()) {
+
+           TransitionEntityChildCommand sECommand =
+               ((TransitionEntityChildCommand)command);
+
+           sECommand.resetToStart();
+           popUpMessage.showMessage(failInfo);
+
+       } else {
+
+           statusBar.setMessage(failInfo);
+
+       }
+
+   }
+
+   /**
+    * Determines if the child entity is a child of the parent
+    * if the while loop reaches the zone before the parent
+    * this returns false, else if it finds the parent returns true.
+    * @param model the world model
+    * @param child The entity to check to see if it is the child of the parent
+    * @param parent The parent
+    * @return Returns false if parent is not found before the zone, else
+    *           returns true.
+    */
+   public boolean isEntityChildOfParent(WorldModel model, Entity child, Entity parent) {
+System.out.println("isEntityChildOfParent called");
+
+       Entity zone = getParentZoneEntity(model, parent);
+       Entity currentEntity = child;
+
+       while (currentEntity != zone) {
+System.out.println("Checking: " + currentEntity);
+           if (currentEntity == null) {
+               return false;
+           }
+
+           Integer initalParentEntityID = (Integer)
+               RulePropertyAccessor.getRulePropertyValue(
+                       currentEntity,
+                       ChefX3DRuleProperties.INITAL_ADD_PARENT);
+
+           if(currentEntity == parent ||
+                   currentEntity.getParentEntityID() == -1) {
+               return true;
+           } else if (initalParentEntityID != null &&
+                   parent.getEntityID() == initalParentEntityID) {
+System.out.println("here is the problem");
+
+               // This works for closetmaid
+               // Not for our catalog
+               currentEntity =
+                   model.getEntity(currentEntity.getParentEntityID());
+
+               continue;
+           }
+
+           currentEntity =
+               model.getEntity(currentEntity.getParentEntityID());
+
+       }
+
+       return false;
+
+   }
+
+   //--------------------------------------------------------------------------
+   // Private methods
+   //--------------------------------------------------------------------------
+
+   /**
+    * Attempt to adjust the scale to assist with the positioning of the
+    * entity that otherwise would be rejected because of overhang limits.
+    *
+    * @param model WorldModel to reference
+    * @param entity Entity being manipulated
+    * @param command Command manipulating entity
+    * @param overhangMinimum Minimum overhang
+    * @return True if successful, false otherwise
+    */
+   private boolean attemptScaleChange(
+           WorldModel model,
+           Entity entity,
+           Command command,
+           Float overhangMinimum) {
+
+        // Only attempt scale change for collisions with entities.
+        // If colliding with zone or segment, this shouldn't be an
+        // issue. Need to have at least two to make this work.
+
+        if (entityMatches.size() > 1) {
+
+            ArrayList<Entity> sortedEntities =
+                sortDescendingRelativePosValueOrder(
+                    model,
+                    entityMatches,
+                    ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS.XAXIS);
+
+            PositionableEntity farRightEntity = null;
+            PositionableEntity farLeftEntity = null;
+
+            // Safety check right and left entity assignments to avoid NPE
+            if (sortedEntities.get(0) instanceof PositionableEntity) {
+                farRightEntity = (PositionableEntity)
+                    sortedEntities.get(0);
+            } else {
+                return false;
+            }
+
+            if (sortedEntities.get(sortedEntities.size()-1)
+                    instanceof PositionableEntity) {
+                farLeftEntity = (PositionableEntity)
+                    sortedEntities.get(sortedEntities.size()-1);
+            } else {
+                return false;
+            }
+
+            // Safety check position data to avoid NPE
+            double[] farLeftPos =
+                getPositionRelativeToZone(model, farLeftEntity);
+
+            if (farLeftPos == null) {
+                return false;
+            }
+
+            double[] farRightPos =
+                    getPositionRelativeToZone(model, farRightEntity);
+
+            if (farRightPos == null) {
+                return false;
+            }
+
+            // Get the bounds data
+            float[] farRightBounds = new float[6];
+            float[] farLeftBounds = new float[6];
+
+            farRightEntity.getBounds(farRightBounds);
+            farLeftEntity.getBounds(farLeftBounds);
+
+            // Perform the calculation
+            double farRightEdge =
+                farRightPos[0] +
+                (farRightBounds[0] + farRightBounds[1]) / 2.0;
+            double farLeftEdge =
+                farLeftPos[0] +
+                (farLeftBounds[0] + farLeftBounds[1]) / 2.0;
+
+            double horizontalMidpoint = (farRightEdge + farLeftEdge) / 2.0;
+            float horizontalWidth = (float)
+                (farRightEdge - farLeftEdge + overhangMinimum * 2.0);
+
+            if (!(entity instanceof PositionableEntity)) {
+                return false;
+            }
+
+            PositionableEntity pEntity = (PositionableEntity) entity;
+
+            if (exceedScaleLimits(
+                    pEntity,
+                    horizontalWidth,
+                    ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS.XAXIS)) {
+                return false;
+            }
+
+            float[] scale = getNewScale(
+                    pEntity,
+                    horizontalWidth,
+                    ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS.XAXIS);
+
+            // Handle commands accordingly
+            if (command instanceof AddEntityChildCommand) {
+
+                AddEntityChildCommand addCmd = (AddEntityChildCommand) command;
+
+                Entity parentEntity = addCmd.getParentEntity();
+
+                double[] parentEntityPos =
+                    getPositionRelativeToZone(model, parentEntity);
+
+                if (parentEntityPos == null) {
+                    return false;
+                }
+
+                double[] entityPos = new double[3];
+                pEntity.getPosition(entityPos);
+                entityPos[0] = horizontalMidpoint - parentEntityPos[0];
+                pEntity.setPosition(entityPos, false);
+                pEntity.setScale(scale);
+
+            } else if (command instanceof AddEntityChildTransientCommand) {
+
+                AddEntityChildTransientCommand addCmd =
+                    (AddEntityChildTransientCommand) command;
+
+                Entity parentEntity = addCmd.getParentEntity();
+
+                double[] parentEntityPos =
+                    getPositionRelativeToZone(model, parentEntity);
+
+                if (parentEntityPos == null) {
+                    return false;
+                }
+
+                double[] entityPos = new double[3];
+                pEntity.getPosition(entityPos);
+                entityPos[0] = horizontalMidpoint - parentEntityPos[0];
+
+                pEntity.setPosition(entityPos, false);
+                pEntity.setScale(scale);
+
+            } else if (command instanceof MoveEntityCommand) {
+
+                MoveEntityCommand moveCmd = (MoveEntityCommand) command;
+
+                Entity parentEntity =
+                    model.getEntity(entity.getParentEntityID());
+
+                if (parentEntity == null) {
+                    return false;
+                }
+
+                double[] parentEntityPos =
+                    getPositionRelativeToZone(model, parentEntity);
+
+                if (parentEntityPos == null) {
+                    return false;
+                }
+
+                double[] entityPos = new double[3];
+                moveCmd.getPosition(entityPos);
+                entityPos[0] = horizontalMidpoint - parentEntityPos[0];
+
+                moveCmd.setPosition(entityPos);
+
+                // Fire off the scale command as a result
+                fireOffScaleComand(model, pEntity, false, entityPos, scale);
+
+            } else if (command instanceof MoveEntityTransientCommand) {
+
+                MoveEntityTransientCommand moveCmd =
+                    (MoveEntityTransientCommand) command;
+
+                double[] entityPos = new double[3];
+                moveCmd.getPosition(entityPos);
+                entityPos[0] = horizontalMidpoint;
+
+                moveCmd.setPosition(entityPos);
+
+                // Fire off the scale command as a result
+                fireOffScaleComand(model, pEntity, true, entityPos, scale);
+
+            } else if (command instanceof TransitionEntityChildCommand) {
+
+                if (!command.isTransient()) {
+
+                    TransitionEntityChildCommand moveCmd =
+                        (TransitionEntityChildCommand) command;
+
+                    Entity parentEntity =
+                        moveCmd.getEndParentEntity();
+
+                    if (parentEntity == null) {
+                        return false;
+                    }
+
+                    double[] parentEntityPos =
+                        getPositionRelativeToZone(model, parentEntity);
+
+                    if (parentEntityPos == null) {
+                        return false;
+                    }
+
+                    double[] entityPos = new double[3];
+                    moveCmd.getEndPosition(entityPos);
+                    entityPos[0] = horizontalMidpoint - parentEntityPos[0];
+
+                    moveCmd.setEndPosition(entityPos);
+
+                    // Fire off the scale command as a result
+    /*              fireOffScaleComand(
+                            model,
+                            pEntity,
+                            moveCmd.isTransient(),
+                            entityPos,
+                            scale);
+*/
+/*
+                    // Need to fire off a copy of the
+                    // TransitionEntityChildCommand to put it in the right spot
+                    // since the scale command will be using the wrong parent.
+                    double[] startingPos = new double[3];
+                    float[] startingRot = new float[4];
+
+                    moveCmd.getStartPosition(startingPos);
+                    moveCmd.getStartingRotation(startingRot);
+
+                    TransitionEntityChildCommand tranCmd =
+                        new TransitionEntityChildCommand(
+                                model,
+                                (PositionableEntity) moveCmd.getEntity(),
+                                moveCmd.getStartParentEntity(),
+                                startingPos,
+                                startingRot,
+                                moveCmd.getEndParentEntity(),
+                                entityPos,
+                                startingRot,
+                                moveCmd.isTransient());
+
+                    addNewlyIssuedCommand(tranCmd);
+                    */
+                }
+
+            } else if (command instanceof ScaleEntityCommand) {
+
+                ScaleEntityCommand scaleCmd = (ScaleEntityCommand) command;
+
+                Entity parentEntity =
+                    model.getEntity(entity.getParentEntityID());
+
+                if (parentEntity == null) {
+                    return false;
+                }
+
+                double[] parentEntityPos =
+                    getPositionRelativeToZone(model, parentEntity);
+
+                if (parentEntityPos == null) {
+                    return false;
+                }
+
+                double[] entityPos = new double[3];
+                scaleCmd.getNewPosition(entityPos);
+                entityPos[0] = horizontalMidpoint - parentEntityPos[0];
+
+                scaleCmd.setNewPosition(entityPos);
+                scaleCmd.setNewScale(scale);
+
+            } else if (command instanceof ScaleEntityTransientCommand) {
+
+                ScaleEntityTransientCommand scaleCmd =
+                    (ScaleEntityTransientCommand) command;
+
+                Entity parentEntity =
+                    model.getEntity(entity.getParentEntityID());
+
+                if (parentEntity == null) {
+                    return false;
+                }
+
+                double[] parentEntityPos =
+                    getPositionRelativeToZone(model, parentEntity);
+
+                if (parentEntityPos == null) {
+                    return false;
+                }
+
+                double[] entityPos = new double[3];
+                scaleCmd.getPosition(entityPos);
+                entityPos[0] = horizontalMidpoint - parentEntityPos[0];
+
+                scaleCmd.setPosition(entityPos);
+                scaleCmd.setScale(scale);
+
+            } else {
+                return false;
+            }
+
+            return true;
+        }
+
+        return false;
+   }
+
+   /**
+    * Check if the newSize is outside the size limits imposed for the entity.
+    *
+    * @param entity Entity to check newSize against
+    * @param newSize New size to check
+    * @param axis Axis to check against
+    * @return True if exceeds scale limit, false otherwise
+    */
+   private boolean exceedScaleLimits(
+           PositionableEntity entity,
+           float newSize,
+           ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS axis) {
+
+        float[] maximumSize = (float[])
+        RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.MAXIMUM_OBJECT_SIZE_PROP);
+
+        float[] minimumSize = (float[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.MINIMUM_OBJECT_SIZE_PROP);
+
+        // Early out check if there are no size limits
+        if (maximumSize == null && minimumSize == null) {
+            return false;
+        }
+
+       switch(axis) {
+           case XAXIS:
+               if (newSize > maximumSize[0] || newSize < minimumSize[0]) {
+                   return true;
+               }
+               break;
+           case YAXIS:
+               if (newSize > maximumSize[1] || newSize < minimumSize[1]) {
+                   return true;
+               }
+               break;
+           case ZAXIS:
+               if (newSize > maximumSize[2] || newSize < minimumSize[2]) {
+                   return true;
+               }
+               break;
+       }
+
+       return false;
+   }
+
+   /**
+    * Calculate the resulting scale with the new size.
+    *
+    * @param entity Entity to change scale for
+    * @param newSize New size for the entity
+    * @param axis Axis to apply new size to
+    * @return New scale
+    */
+   private float[] getNewScale(
+           PositionableEntity entity,
+           float newSize,
+           ChefX3DRuleProperties.TARGET_ADJUSTMENT_AXIS axis) {
+
+       float[] scale = new float[3];
+       float[] size = new float[3];
+
+       entity.getScale(scale);
+       entity.getSize(size);
+
+       switch(axis) {
+       case XAXIS:
+           scale[0] = newSize / size[0];
+           break;
+       case YAXIS:
+           scale[1] = newSize / size[1];
+           break;
+       case ZAXIS:
+           scale[2] = newSize / size[2];
+           break;
+       }
+
+       return scale;
+   }
+
+   /**
+    * Fire off the appropriate scale command for rule evaluation and
+    * execution.
+    *
+    * @param model WorldModel to reference
+    * @param entity Entity to issue command for
+    * @param isTransient Should be a transient command
+    * @param newPos New position
+    * @param newScale New scale
+    */
+   private void fireOffScaleComand(
+           WorldModel model,
+           PositionableEntity entity,
+           boolean isTransient,
+           double[] newPos,
+           float[] newScale) {
+
+    // get the children now
+       ArrayList<Entity> startChildren = new ArrayList<Entity>();
+       int len = entity.getChildCount();
+       for (int i = 0; i < len; i++) {
+           startChildren.add(entity.getChildAt(i));
+       }
+
+       ArrayList<PositionableData> startPositions =
+        new ArrayList<PositionableData>();
+       len = startChildren.size();
+       for (int i = 0; i < len; i++) {
+           Entity child = startChildren.get(i);
+
+           if (child instanceof PositionableEntity) {
+               startPositions.add(
+                    ((PositionableEntity)child).
+                        getPositionableData());
+           }
+       }
+
+       double[] startPos = new double[3];
+       float[] startScale = new float[3];
+
+       entity.getStartingPosition(startPos);
+       entity.getStartingScale(startScale);
+
+       Command command = null;
+       ArrayList<Command> commandList = new ArrayList<Command>();
+
+       if (isTransient) {
+
+           ScaleEntityTransientCommand scaleCmd =
+               new ScaleEntityTransientCommand(
+                   model,
+                   model.issueTransactionID(),
+                   entity.getEntityID(),
+                   newPos,
+                   newScale);
+
+           commandList.add(scaleCmd);
+           command = new MultiTransientCommand(
+                   commandList,
+                   "MultiCommand -> Transient OverhangLimitRule adjust scale",
+                   false);
+       } else {
+/*
+            ScaleEntityCommand scaleCmd =
+                new ScaleEntityCommand(
+                    model,
+                    model.issueTransactionID(),
+                    entity.getEntityID(),
+                    newPos,
+                    startPos,
+                    newScale,
+                    startScale,
+                    startChildren,
+                    startPositions);
+*/
+
+            ScaleEntityCommand scaleCmd =
+                new ScaleEntityCommand(
+                    model,
+                    model.issueTransactionID(),
+                    entity.getEntityID(),
+                    newPos,
+                    startPos,
+                    newScale,
+                    startScale);
+
+            commandList.add(scaleCmd);
+               command = new MultiCommand(
+                       commandList,
+                       "MultiCommand -> OverhangLimitRule adjust scale",
+                       false,
+                       false);
+       }
+
+
+       addNewlyIssuedCommand(command);
+   }
+}

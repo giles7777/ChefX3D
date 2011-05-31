@@ -1,0 +1,7 @@
+Trusted-Only: true
+Extension-Name: ChefX3D
+Specification-Vendor: Yumetech, Inc
+Specification-Version: 1.0
+Implementation-Vendor-Id: com.yumetech
+Implementation-Vendor: Yumetech, Inc
+Implementation-Version: 1.0

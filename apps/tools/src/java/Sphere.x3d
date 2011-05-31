@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 3.0 Interactive//EN" 
+  "http://www.web3d.org/specifications/x3d-3.0.dtd">
+<X3D profile="Interactive" version="3.0">
+  <Scene>
+  <Shape>
+	<Sphere radius='0.1875' />
+	<Appearance>
+	    <Material diffuseColor='0 1 0' ambientIntensity='0.5' specularColor='0 1 0' emissiveColor='0 1 0'/>
+	</Appearance>
+  </Shape>
+  </Scene>
+</X3D>

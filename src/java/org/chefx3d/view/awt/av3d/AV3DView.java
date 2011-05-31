@@ -1,0 +1,1051 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2009 - 2010
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.view.awt.av3d;
+
+// External Imports
+import java.awt.*;
+import java.awt.event.*;
+
+import org.j3d.aviatrix3d.pipeline.graphics.*;
+
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
+
+import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Set;
+
+import javax.media.opengl.GLCapabilities;
+
+import javax.swing.ImageIcon;
+import javax.swing.JButton;
+import javax.swing.JComponent;
+import javax.swing.JLabel;
+import javax.swing.JPanel;
+import javax.swing.JToolBar;
+
+import org.j3d.aviatrix3d.Layer;
+import org.j3d.aviatrix3d.SimpleViewport;
+
+import org.j3d.aviatrix3d.output.graphics.SimpleAWTSurface;
+
+import org.j3d.aviatrix3d.management.RenderManager;
+import org.j3d.aviatrix3d.management.SingleDisplayCollection;
+import org.j3d.aviatrix3d.management.SingleThreadRenderManager;
+
+import org.j3d.util.I18nManager;
+
+// Local Imports
+import org.chefx3d.catalog.CatalogManager;
+import org.chefx3d.model.*;
+
+import org.chefx3d.view.awt.scenemanager.*;
+
+import org.chefx3d.tool.EntityBuilder;
+import org.chefx3d.tool.DefaultEntityBuilder;
+import org.chefx3d.tool.Tool;
+
+import org.chefx3d.toolbar.ToolBarManager;
+
+import org.chefx3d.ui.LoadingProgressListener;
+
+import org.chefx3d.util.DefaultErrorReporter;
+import org.chefx3d.util.ErrorReporter;
+import org.chefx3d.util.FileLoader;
+
+import org.chefx3d.view.View;
+import org.chefx3d.view.ViewListener;
+import org.chefx3d.view.ViewManager;
+
+import org.chefx3d.view.common.EditorConstants;
+import org.chefx3d.view.common.EditorView;
+import org.chefx3d.view.common.EntityWrapper;
+import org.chefx3d.view.common.RuleCollisionChecker;
+import org.chefx3d.view.common.StatusReporter;
+import org.chefx3d.view.common.NearestNeighborMeasurement;
+
+/**
+ * A View which is backed by an aviatrix3D scene.
+ *
+ * @author Jonathon Hubbard
+ * @version $Revision: 1.104 $
+ */
+public class AV3DView extends JPanel implements
+    EditorView,
+    ComponentListener,
+    ContainerListener,
+    PerFrameObserver,
+    ActionListener,
+    AV3DConstants,
+    EditorConstants,
+    Thumbnailable {
+
+    /** Identifier of this */
+    private static final String VIEW_ID = "Editor";
+
+    /** Warning message that a url could not be decoded */
+    private static final String INVALID_URL_MSG =
+        "org.chefx3d.view.awt.av3d.AV3DView.invalidURLMsg";
+
+    /** Error message if openGL cannot be loaded */
+    private static String OPENGL_INIT_FAILED_MSG =
+        "org.chefx3d.view.awt.av3d.AV3DView.openGLInitFailedMsg";
+
+    /** Default framerate for the preview in milliseconds per frame */
+    private static final int DEFAULT_FPS = 10;
+
+    /** The default initial viewport dimensions for the location layer */
+    private static final int[] LOCATION_VIEWPORT_DIMENSION =
+        new int[]{0, 0, 600, 600};
+
+    /** The default initial viewport dimensions for the overlay layer */
+    private static final int[] OVERLAY_VIEWPORT_DIMENSION =
+        new int[]{0, 0, 500, 545};
+
+    /** The default number of antialiasing samples.
+     * TODO: Need to determine max and crank down based on fps
+     */
+    private static final int antialiasingSamples = 1;
+
+    /** I18N manager for sourcing messages */
+    private I18nManager i18n_mgr;
+
+    /** The ErrorReporter for messages */
+    private ErrorReporter errorReporter;
+
+    /** Then the basic layer and viewport at the top */
+    private SimpleViewport locationView;
+
+    /** Manager for the scene graph handling */
+    private SingleThreadRenderManager sceneManager;
+
+    /** Manager for the layers etc */
+    private SingleDisplayCollection displayManager;
+
+    /** Our drawing surface */
+    private GraphicsOutputDevice graphicsSurface;
+
+    /**
+     * The component to use for the graphics surface. May end up being
+     * the warning label if JOGL fails to initialise properly so always
+     * use this in preference to the graphicsSurface.getSurfaceObject().
+     */
+    private Component graphicsComponent;
+
+    /** The scene manager Observer*/
+    private SceneManagerObserver mgmtObserver;
+
+    /** List of commands that have been buffered */
+    private CommandController controller;
+
+    /** The resize manager */
+    private ViewEnvironmentResizeManager resize_manager;
+
+    /** The world model */
+    private WorldModel model;
+
+    /** Utility class to construct entities from tools */
+    private EntityBuilder entityBuilder;
+
+    /** The manager for physical input devices */
+    private DeviceManager deviceManager;
+
+    /** flag indicating that the viewport has been resized */
+    private boolean resizeOccured;
+
+    /** Location layer manager */
+    private LocationLayerManager location;
+
+    /** Overlay layer manager */
+    private OverlayLayerManager overlay;
+
+    /** Selection layer manager */
+    private SelectionLayerManager selection;
+
+    /** The filter to use for url requests, null use baseURL logic instead */
+    protected URLFilter urlFilter;
+
+    /** The set of selectable entity categories */
+    private Set<String> categorySet;
+
+    //////////////////////////////////////////////////////////////////////
+    // UI components
+
+    /** The mode selection toolbar */
+    private JToolBar toolBar;
+
+    /** Selector to reset the navigation */
+    private JButton resetButton;
+
+    //////////////////////////////////////////////////////////////////////
+
+    /** flag to prevent initialization from happening twice */
+    private boolean initialized;
+
+    /** The listeners..... */
+    private ArrayList<ViewListener> viewListeners;
+
+    /** A progress bar notification */
+    private LoadingProgressListener progressListener;
+    
+    /** The data model that holds the various catalogs */
+    private CatalogManager catalogMgr;
+    
+    /**
+     * Constructor
+     *
+     * @param window The Window object that is our prime ancestor
+     * @param model The WorldModel object
+     * @param controller The CommandController
+     */
+    public AV3DView(
+        Window window,
+        WorldModel model,
+        CommandController controller, 
+        CatalogManager catalogMgr, 
+        LoadingProgressListener progressListener) {
+
+        super(new BorderLayout());
+
+        init(window, model, controller, catalogMgr, null, progressListener);
+    }
+
+    /**
+     * Constructor
+     *
+     * @param window The Window object that is our prime ancestor
+     * @param model The WorldModel object
+     * @param controller The CommandController
+     * @param urlFilter The filter to use for url requests
+     */
+    public AV3DView(
+        Window window,
+        WorldModel model,
+        CommandController controller,
+        CatalogManager catalogMgr, 
+        URLFilter urlFilter, 
+        LoadingProgressListener progressListener) {
+
+        super(new BorderLayout());
+
+        init(window, model, controller, catalogMgr, urlFilter, progressListener);
+    }
+
+    //----------------------------------------------------------
+    // Methods defined by Component
+    //----------------------------------------------------------
+
+    /**
+     * Notification that the panel now has a native component. Use this
+     * to start the render manager.
+     */
+    @Override
+    public void addNotify() {
+        super.addNotify();
+        sceneManager.addDisplay(displayManager);
+        ////////////////////////////////////////////////////////////////
+        // set the selection layer as ui listener before the location
+        // layer - causing the callback to the selection layer to
+        // be processed first
+        mgmtObserver.addUIObserver(selection);
+        mgmtObserver.addUIObserver(location);
+        ////////////////////////////////////////////////////////////////
+        mgmtObserver.addUIObserver(overlay);
+
+        this.revalidate();
+    }
+
+    /**
+     * Notification that this is destined to be removed from it's parent
+     * component. Shutdown the render manager.
+     */
+    @Override
+    public void removeNotify() {
+        sceneManager.removeDisplay(displayManager);
+        mgmtObserver.removeUIObserver(selection);
+        mgmtObserver.removeUIObserver(location);
+        mgmtObserver.removeUIObserver(overlay);
+
+        super.removeNotify();
+    }
+
+    /**
+     *
+     */
+    @Override
+    public boolean isOptimizedDrawingEnabled() {
+        return false;
+    }
+
+    //---------------------------------------------------------------
+    // Methods defined by PerFrameObserver
+    //---------------------------------------------------------------
+
+    /**
+     * A new frame tick is observed, so do some processing now.
+     */
+    public void processNextFrame() {
+        if (resizeOccured) {
+            resize_manager.sendResizeUpdates();
+            resizeOccured=false;
+        }
+    }
+
+    //----------------------------------------------------------
+    // Methods defined by ComponentListener
+    //----------------------------------------------------------
+
+    /**
+     * Processes the component hide event.
+     * @param evt The event that caused this method to be called
+     */
+    public void componentHidden(ComponentEvent evt) {
+
+    }
+
+    /**
+     * Processes the component moved event.
+     * @param evt The event that caused this method to be called
+     */
+    public void componentMoved(ComponentEvent evt) {
+
+    }
+
+    /**
+     *  Processes the component resize event.
+     *  @param evt The event that caused this method to be called
+     */
+    public void componentResized(ComponentEvent evt) {
+
+        Dimension dim = getSize();
+        int width = dim.width;
+        int height = dim.height;
+        setPreferredSize(dim);
+        revalidate();
+
+        if (resize_manager != null) {
+            resize_manager.graphicsDeviceResized(
+                0,
+                0,
+                this.getSize().width,
+                this.getSize().height);
+            resizeOccured=true;
+        }
+    }
+
+    /**
+     * Processes the component shown event.
+     * @param evt The event that caused this method to be called
+     */
+    public void componentShown(ComponentEvent evt) {
+
+    }
+
+    //----------------------------------------------------------
+    // Methods defined by ContainerListener
+    //----------------------------------------------------------
+
+    /**
+     * Invoked when a component has been added to the container.
+     */
+    public void componentAdded(ContainerEvent ce) {
+        if ((ce.getContainer() == this) &&
+            (ce.getChild() == graphicsComponent)) {
+
+            for (int i = 0; i < viewListeners.size(); i++) {
+                ViewListener vl = viewListeners.get(i);
+                vl.viewInitialized(this);
+            }
+
+            Dimension dim = getSize();
+            int width = dim.width;
+            int height = dim.height;
+            setPreferredSize(dim);
+            this.revalidate();
+
+            resize_manager.graphicsDeviceResized(
+                0,
+                0,
+                this.getSize().width,
+                this.getSize().height);
+            resizeOccured=true;
+        }
+    }
+
+    /**
+     * Invoked when a component has been removed from the container.
+     */
+    public void componentRemoved(ContainerEvent ce) {
+    }
+
+    //----------------------------------------------------------
+    // Methods defined by AuthoringComponent
+    //----------------------------------------------------------
+
+    /**
+     * Get the rendering component.
+     *
+     * @return The rendering component
+     */
+    public JComponent getComponent() {
+        return(this);
+    }
+
+    //----------------------------------------------------------
+    // Methods defined by View 
+    //----------------------------------------------------------
+    
+    /**
+     * Clean up any references
+     */
+    public void shutdown() {
+        sceneManager.disableInternalShutdown();
+        sceneManager.shutdown();
+        mgmtObserver.appShutdown();
+        graphicsSurface.dispose();
+    }
+
+    /**
+     * Register an error reporter with the command instance
+     * so that any errors generated can be reported in a nice manner.
+     *
+     * @param reporter The new ErrorReporter to use.
+     */
+    public void setErrorReporter(ErrorReporter reporter) {
+        errorReporter = (reporter != null) ?
+            reporter : DefaultErrorReporter.getDefaultReporter();
+    }
+
+    /**
+     * Set the current tool.
+     *
+     * @param tool The tool
+     */
+    public void setTool(Tool tool) {
+
+        if (location != null) {
+            location.setTool(tool);
+        }
+
+    }
+
+    /**
+     * Go into associate mode. The next mouse click will perform
+     * a property update
+     *
+     * @param validTools A list of the valid tools. null string will be all
+     *        valid. empty string will be none.
+     * @param propertyGroup The grouping the property is a part of
+     * @param propertyName The name of the property being associated
+     */
+    public void enableAssociateMode(
+        String[] validTools,
+        String propertyGroup,
+        String propertyName) {
+
+    }
+
+    /**
+     * Exit associate mode.
+     */
+    public void disableAssociateMode() {
+
+    }
+
+    /**
+     * Set how helper objects are displayed.
+     *
+     * @param mode The mode
+     */
+    public void setHelperDisplayMode(int mode) {
+
+    }
+
+    /**
+     * Get the viewID.  This shall be unique per view on all systems.
+     * TODO Need to fix to return proper # currently only returning 0
+     * @return The unique view ID
+     */
+
+    public long getViewID() {
+        return 0;
+    }
+
+    /**
+     * Control of the view has changed.
+     *
+     * @param newMode The new mode for this view
+     */
+    public void controlChanged(int newMode) {
+
+    }
+
+    /**
+     * Return the EntityBuilder
+     *
+     * @return the entityBuilder
+     */
+    public EntityBuilder getEntityBuilder() {
+        if (entityBuilder == null) {
+            entityBuilder = DefaultEntityBuilder.getEntityBuilder();
+        }
+
+        return entityBuilder;
+    }
+
+    /**
+     * Set the class used to create entities from tools
+     *
+     * @param entityBuilder The entityBuilder to set
+     */
+    public void setEntityBuilder(EntityBuilder entityBuilder) {
+        this.entityBuilder = entityBuilder;
+        if (location != null) {
+            location.setEntityBuilder(entityBuilder);
+        }
+    }
+
+    //----------------------------------------------------------
+    // Methods defined by EditorView 
+    //----------------------------------------------------------
+    
+    /**
+     * Return the RuleCollisionChecker
+     *
+     * @return The RuleCollisionChecker
+     */
+    public RuleCollisionChecker getRuleCollisionChecker() {
+        return(location.getEntityCollisionManager());
+    }
+      
+    /**
+     * Return the CatalogManager
+     *
+     * @return The CatalogManager
+     */
+    public CatalogManager getCatalogManager() {
+    	return(catalogMgr);
+    }
+
+    /**
+     * Return the currently active LocationEntity
+     *
+     * @return The currently active LocationEntity
+     */
+    public LocationEntity getActiveLocationEntity() {
+        return(location.getActiveLocationEntity());
+    }
+
+    /**
+     * Return the StatusReporter
+     *
+     * @return The StatusReporter
+     */
+    public StatusReporter getStatusReporter() {
+        return(selection);
+    }
+
+    /**
+     * Return the entity wrapper map.
+     *
+     * @return HashMap<Integer, EntityWrapper>
+     */
+    public HashMap<Integer, EntityWrapper> getEntityWrapperMap(){
+        return((HashMap<Integer, EntityWrapper>)location.getEntityWrapperMap());
+    }
+
+    /**
+     * Get the zoom amount of the current view.
+     *
+     * @return double zoom amount
+     */
+    public double getZoneViewZoomAmount(){
+        return location.getZoneViewZoom();
+    }
+
+	/**
+	 * Return the zone relative mouse position in the argument array.
+	 * If the arguement is null or less than length 3, a new array
+	 * will be allocated and returned.
+	 * 
+	 * @param position An array for the return value
+	 * @return The array containing the return value
+	 */
+	public float[] getZoneRelativeMousePosition(float[] position) {
+		position = location.getZoneRelativeMousePosition(position);
+		return(position);
+	}
+
+    /**
+     * It would be awesome if this had some proper javadoc! Just
+     * imagine what all those booleans in the anchorFlags array
+     * might mean.
+     */
+    public void setSelectionAnchors(Entity entity, boolean[] anchorFlags) {
+        selection.setSelectionAnchors(entity, anchorFlags);
+    }
+
+    /**
+     * Get the selected anchor data identifying which anchor
+     * is selected. Either NORTH, SOUTH, SOUTHWEST etc.
+     * 
+     * @return EditorConstants.AnchorData identifier for selected anchor
+     */
+    public EditorConstants.AnchorData getSelectedAnchorData() {
+    	return(selection.getSelectedAnchorData());
+    }
+    	
+    /**
+     * Return the NearestNeighborMeasurement object
+     * 
+     * @return The NearestNeighborMeasurement object
+     */
+    public NearestNeighborMeasurement getNearestNeighborMeasurement() {
+		return(location.getNearestNeighborMeasurement());
+	}
+    
+	/**
+	 * Return the editor object to it's initial state
+	 */
+	public void reset() {
+		EntitySelectionHelper.getEntitySelectionHelper().clearSelectedList();
+		ViewManager.getViewManager().setTool(null);
+        ToolBarManager.getToolBarManager().setTool(null);
+	}
+	
+    //---------------------------------------------------------
+    // Method defined by ActionListener
+    //---------------------------------------------------------
+
+    /**
+     * UI event handler
+     */
+    public void actionPerformed(ActionEvent ae) {
+
+        Object source = ae.getSource();
+        if (source == resetButton) {
+            location.resetNavigation();
+        }
+    }
+
+    //----------------------------------------------------------
+    // Methods defined by Thumbnailable
+    //----------------------------------------------------------
+
+    /**
+     * @return a new ThumbnailData object
+     */
+    public ThumbnailData getThumbnailData() {
+        return new ThumbnailData(null,
+                                 this,
+                                 location.getScene(),
+                                 mgmtObserver,
+                                 controller,
+                                 model);
+    }
+
+
+    //----------------------------------------------------------
+    // Local Methods - public
+    //----------------------------------------------------------
+
+    /**
+     * Perform actions that need to occur during step selection events.
+     * This is called by the ClosetmaidEditor over in the closetmaid
+     * project, and is necessary because we need a way to provide
+     * non-ChefX3D projects (such as closetmaid) a way to access
+     * LocationLayerManager and OverlayLayerManager in some limited way.
+     * This method is parameter-free to keep it as generic as possible,
+     * in order to limit coupling as much as we can.
+     */
+    public void stepSelected(int action){
+        //
+        // perform actions that need to trigger during step selection events
+        //
+        overlay.stepSelected();
+
+        location.clearShadowEntities();
+    }
+
+    /**
+     * Perform a clear action
+     */
+    public void clearAction(){
+        overlay.stepSelected();
+    }
+
+    /**
+     * Toggle the overlay layer manager's grid overlay
+     */
+    public void enableGridOverlay(boolean enable){
+        if (overlay != null) {
+            overlay.enableGridOverlay(enable);
+        }
+    }
+
+    /**
+     * Toggle the overlay layer manager's tape measure on or off.
+     *
+     * @param enable if TRUE, enable the tape measure;
+     * else disable the tape measure
+     */
+    public void enableTapeMeasure(boolean enable){
+
+        if ( overlay != null )
+            overlay.enableTapeMeasure(enable);
+
+        if(location == null){
+            return;
+        } else if ( enable) {
+            Set<String> emptyList = new java.util.HashSet<String>();
+            location.setSelectionCategories(emptyList);
+        } else {
+            location.setSelectionCategories(categorySet);
+        }
+    }
+
+    /**
+     * Toggle the overlay layer manager's nearest neighbor overlay
+     */
+    public void enableNearestNeighbor(boolean enable){
+        if (overlay != null) {
+            overlay.enableNearestNeighbor(enable);
+        }
+    }
+
+    /**
+     * Toggle the overlay layer manager's dimensional guides
+     */
+    public void enableDimensionalGuide(boolean enable){
+        if (overlay != null) {
+            overlay.enableDimensionalGuide(enable);
+        }
+    }
+
+    /**
+     * Toggle the overlay layer manager's dimensional indicator overlay
+     */
+    public void enableDimensionalIndicator(boolean enable){
+        if (overlay != null) {
+            overlay.enableDimensionalIndicator(enable);
+        }
+    }
+
+    /**
+     * Return the identifier string of this
+     *
+     * @return The identifier string of this
+     */
+    public String getIdentifier() {
+        return(VIEW_ID);
+    }
+
+    /**
+     * Initialize the view by adding the aviatrix graphics
+     * component to its parent
+     */
+    public void initialize() {
+
+        if (!initialized) {
+
+//            setupAviatrix();
+
+//            setupSceneGraph();
+
+            add(graphicsComponent, BorderLayout.CENTER);
+
+            // for listening to mouseEntered and mouseExited events
+            graphicsComponent.addMouseListener(location);
+            graphicsComponent.addMouseListener(overlay);
+
+            initialized = true;
+        }
+    }
+
+    /**
+     * Return the NavigationManager
+     *
+     * @return The NavigationManager
+     */
+    public NavigationManager getNavigationManager() {
+        return(location.getNavigationManager());
+    }
+
+    /**
+     * Return the SceneManagerObserver
+     *
+     * @return The SceneManagerObserver
+     */
+    public SceneManagerObserver getSceneManagerObserver() {
+        return(mgmtObserver);
+    }
+
+    /**
+     * The set of entity categories that can be selected.
+     * Pass-through to the LocationLayerManager.  ->This method
+     * should only be called during the step selection sequence!<-
+     *
+     * categorySet The set of categories
+     */
+    public void setSelectionCategories(Set<String> categorySet) {
+        this.categorySet = categorySet;
+        if (location != null)
+            location.setSelectionCategories(categorySet);
+    }
+
+    /**
+     * Add a listener for View status events
+     *
+     * @param vl The listener to add
+     */
+    public void addViewListener(ViewListener vl) {
+        if (!viewListeners.contains(vl)) {
+            viewListeners.add(vl);
+        }
+    }
+
+    //----------------------------------------------------------
+    // Local Methods - private
+    //----------------------------------------------------------
+
+    /**
+     * Get the render manager instance that was created by this class
+     *
+     * @return A non-null reference to the manager
+     */
+    public RenderManager getRenderManager() {
+        return sceneManager;
+    }
+
+    /**
+     * Setup the aviatrix pipeline
+     */
+    private void setupAviatrix() {
+
+        // Assemble a simple single-threaded pipeline.
+        GLCapabilities caps = new GLCapabilities();
+        caps.setDoubleBuffered(true);
+        caps.setHardwareAccelerated(true);
+
+        if (antialiasingSamples > 1) {
+            caps.setSampleBuffers(true);
+            caps.setNumSamples(antialiasingSamples);
+        }
+
+        GraphicsCullStage culler = new FrustumCullStage();
+        culler.setOffscreenCheckEnabled(true);
+
+        GraphicsSortStage sorter = new StateAndTransparencyDepthSortStage();
+        try {
+            graphicsSurface = new SimpleAWTSurface(caps);
+            // DEBUG: graphicsSurface = new DebugAWTSurface(caps);
+        } catch(UnsatisfiedLinkError usl) {
+            String msg = i18n_mgr.getString(OPENGL_INIT_FAILED_MSG);
+            graphicsComponent = new JLabel(msg);
+            return;
+        }
+
+        DefaultGraphicsPipeline graphicsPipeline = new DefaultGraphicsPipeline();
+        graphicsComponent = (Component)graphicsSurface.getSurfaceObject();
+
+        graphicsPipeline.setCuller(culler);
+        graphicsPipeline.setSorter(sorter);
+        graphicsPipeline.setGraphicsOutputDevice(graphicsSurface);
+
+        displayManager = new SingleDisplayCollection();
+        displayManager.addPipeline(graphicsPipeline);
+
+        // Render manager
+        sceneManager = new SingleThreadRenderManager();
+        sceneManager.addDisplay(displayManager);
+        sceneManager.setMinimumFrameInterval(DEFAULT_FPS);
+
+        deviceManager = new DefaultDeviceManager();
+        deviceManager.setErrorReporter(errorReporter);
+
+        mgmtObserver =
+            new SceneManagerObserver(deviceManager, controller);
+
+        mgmtObserver.addObserver(this);
+
+        sceneManager.setEnabled(true);
+    }
+
+    /**
+     * Setup the basic scene
+     */
+    private void setupSceneGraph() {
+        //
+        // Create navigation status manager, resize manager, and cursor manager
+        //
+        NavigationStatusManager navStatusManager =
+            new NavigationStatusManager();
+
+        resize_manager =
+            new ViewEnvironmentResizeManager();
+
+        AV3DCursorManager cursorManager =
+            new AV3DCursorManager(graphicsComponent);
+
+        //
+        // set up the location layer manager, including its view environment
+        //
+        location = new LocationLayerManager(
+            0,
+            LOCATION_VIEWPORT_DIMENSION,
+            VIEW_ID,
+            model,
+            controller,
+            errorReporter,
+            mgmtObserver,
+            deviceManager,
+            cursorManager,
+            navStatusManager,
+            urlFilter, 
+            progressListener);
+        location.setEntityBuilder(entityBuilder);
+        location.setSelectionCategories(categorySet);
+
+        resize_manager.addManagedViewport(location.viewport);
+        resize_manager.addResizeListener(location);
+
+		LocationLegendLayerManager legend = new LocationLegendLayerManager(
+        	1,
+        	LOCATION_VIEWPORT_DIMENSION,
+        	model,
+        	errorReporter,
+        	mgmtObserver,
+        	navStatusManager);
+		location.addConfigListener(legend);
+		
+        selection = new SelectionLayerManager(
+            2,
+            LOCATION_VIEWPORT_DIMENSION,
+            model,
+            controller,
+            errorReporter,
+            mgmtObserver,
+            deviceManager,
+            cursorManager,
+            navStatusManager);
+		location.addConfigListener(selection);
+
+        resize_manager.addManagedViewport(selection.viewport);
+        resize_manager.addResizeListener(selection);
+
+        ////////////////////////////////////////////////////////////////
+        // rem: this is dubious, but.....
+        // set the selection layer as ui listener before the location
+        // layer - causing the callback to the selection layer to
+        // be processed first
+        mgmtObserver.addUIObserver(selection);
+        mgmtObserver.addUIObserver(location);
+        ////////////////////////////////////////////////////////////////
+
+        //
+        // set up the overlay layer manager, including its view environment
+        //
+        overlay = new OverlayLayerManager(
+                3,
+                OVERLAY_VIEWPORT_DIMENSION,
+                model,
+                controller,
+                errorReporter,
+                mgmtObserver,
+                deviceManager,
+                location);
+
+
+        resize_manager.addManagedViewport(overlay.viewport);
+        resize_manager.addResizeListener(overlay);
+
+        navStatusManager.addNavigationStatusListener(overlay);
+
+        //
+        // give the display manager the array of layers to display
+        //
+        Layer[] layers = {
+            location.layer, 
+			legend.layer,
+            selection.layer,
+            overlay.layer};
+
+        displayManager.setLayers(layers, layers.length);
+
+        //
+        // put the last few pieces in place
+        //
+        graphicsSurface.addGraphicsResizeListener(resize_manager);
+        graphicsSurface.addGraphicsResizeListener(legend);
+
+        deviceManager.addTrackedSurface(graphicsSurface,
+                                        location.getUserInputHandler());
+        deviceManager.addTrackedSurface(graphicsSurface,
+                                        selection.getUserInputHandler());
+        deviceManager.addTrackedSurface(graphicsSurface,
+                                        overlay.getUserInputHandler());
+
+
+        sceneManager.setApplicationObserver(mgmtObserver);
+    }
+
+    /**
+     * Common intialization code.
+     *
+     * @param window The Window object that is our prime ancestor
+     * @param model The world model to use
+     * @param controller The controller to use
+     * @param urlFilter - The filter to use for url requests
+     */
+    private void init(
+        Window window,
+        WorldModel model,
+        CommandController controller,
+        CatalogManager catalogMgr, 
+        URLFilter urlFilter, 
+        LoadingProgressListener progressListener) {
+
+        window.addWindowListener(new WindowAdapter(){
+        	public void windowOpened(WindowEvent e){
+        		initialize();
+        	}
+        });
+        
+        
+        addComponentListener(this);
+        addContainerListener(this);
+        setPreferredSize(new Dimension(LOCATION_VIEWPORT_DIMENSION[2],
+                                       LOCATION_VIEWPORT_DIMENSION[3]));
+
+        entityBuilder = DefaultEntityBuilder.getEntityBuilder();
+        viewListeners = new ArrayList<ViewListener>();
+
+        i18n_mgr = I18nManager.getManager();
+
+        this.model = model;
+        this.urlFilter = urlFilter;
+        this.controller = controller;
+        this.catalogMgr = catalogMgr;
+        this.progressListener = progressListener;
+        
+        ViewManager.getViewManager().addView(this);
+
+        setupAviatrix();
+        setupSceneGraph();
+    }
+    
+    
+    public void resetLocationLayerNavigation() {
+        location.resetNavigation();
+    }
+}

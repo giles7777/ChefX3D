@@ -1,0 +1,68 @@
+<html>
+<head>
+<title>ChefX3D - View Design</title>
+</head>
+
+<body>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+</center>
+
+<h1 align=center>View Design</h1>
+
+<p>
+A view is an editable display of the world model.  Common types of views might be 2D Image,
+2D Vector, or 3D view.  Multiple views might be active in a viewing application at once.
+</p>
+
+<hr/>
+
+<a name="Concepts">
+<h2>Concepts</h2></a>
+
+<p>
+<h3>View Properties</h3>
+In addition to the properties an entity has defined, there will also be a set
+properties defined for views.  These properties are editable while in the view.  They
+include the entities location and orientation.  Its acceptable for a property to exist
+in both places.
+</p>
+<h3>Selection Set</h3>
+All views share a common selection set.  Some tools will operate on this set.
+
+<h3>Undo/Redo</h3>
+A view shall be able to undo/redo changes.  The command list will be a global list of
+changes made to the model.  Anything not changing the model will not be affected, ie things
+like turning on wireframe mode.
+
+<h3>Placement Help</h3>
+A view might implement a snap-to functionality.  Or a feature which helps place objects in
+a tight space.  A space planner application might use this to help pack objects into a 3D space
+without any of the objects penetrating or wasting space.
+<hr>
+<h2>Implementation</h2>
+<p>
+Views will be the largest single piece of code in the system.  The library user can
+implement their own views, but its expected that most users will use the premade versions.
+<h4>Model Updates</h4>
+All changes made in a view must be communicated to the model.
+</p>
+<p>
+<h2>Open Issues</h2>
+
+<hr>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+<br>
+<i>Last Updated: $Date: 2007/04/05 21:32:52 $<br>
+Version: $Revision: 1.2 $</I>
+</center>
+
+</body>
+</html>

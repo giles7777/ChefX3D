@@ -1,0 +1,139 @@
+#*********************************************************************
+#
+#  (C) 2005 Yumetech, Inc
+#    http://www.yumetech.com
+#
+# Author: Justin Couch
+# Version: $Revision: 1.47 $
+#
+#*********************************************************************
+
+# Names of packages to be compiled. These are declared in the order that
+# they are to be compiled in. We create one at a time
+BUILD_ORDER = org.chefx3d \
+  org.chefx3d.rules.properties \
+  org.chefx3d.util \
+  org.chefx3d.ui \
+  org.chefx3d.model \
+  org.chefx3d.tool \
+  org.chefx3d.rules.util \
+  org.chefx3d.rules.properties.accessors \
+  org.chefx3d.catalog \
+  org.chefx3d.cache.event \
+  org.chefx3d.cache \
+  org.chefx3d.cache.loader \
+  org.chefx3d.cache.content \
+  org.chefx3d.cache.protocol \
+  org.chefx3d.cache.javanet.protocol.http \
+  org.chefx3d.cache.javanet.protocol.https \
+  org.chefx3d.cache.protocol.http \
+  org.chefx3d.cache.protocol.https \
+  org.chefx3d.cache.protocol.jar \
+  org.chefx3d.toolbar \
+  org.chefx3d.view \
+  org.chefx3d.property \
+  org.chefx3d.property.awt \
+  org.chefx3d.toolbar.awt \
+  org.chefx3d.view.awt \
+  org.chefx3d.actions.awt \
+  org.chefx3d.view.awt.entitytree \
+  org.chefx3d.view.awt.scenemanager \
+  org.chefx3d.view.awt.av3d \
+  org.chefx3d.view.swt \
+  org.chefx3d.view.net \
+  org.chefx3d.view.net.xmpp \
+  org.chefx3d.toolbar.swt \
+  org.chefx3d.property.swt \
+  org.chefx3d.catalog.util \
+  org.chefx3d.catalog.util.awt \
+  org.chefx3d.rules.definitions \
+  org.chefx3d.rules.engines \
+  org.chefx3d.rules.interpreters \
+  org.chefx3d.rules.controller \
+  org.chefx3d.rules.catalog \
+  
+#org.chefx3d.view.awt.gt2d \
+#org.chefx3d.util.treetable 
+#org.chefx3d.view.awt.propertyeditor
+  
+# Names of packages that we want included in the javadoc
+JAVADOC_PACKAGES =  org.chefx3d \
+  org.chefx3d.util \
+  org.chefx3d.messaging \
+  org.chefx3d.rules.definitions \
+  org.chefx3d.rules.engines \
+  org.chefx3d.rules.interpreters \
+  org.chefx3d.rules.properties \
+  org.chefx3d.rules.catalog \
+  org.chefx3d.tool \
+  org.chefx3d.catalog \
+  org.chefx3d.model \
+  org.chefx3d.view \
+  org.chefx3d.property \
+  org.chefx3d.toolbar \
+  org.chefx3d.property.awt \
+  org.chefx3d.view.awt.entitytree \
+  org.chefx3d.view.awt.scenemanager \
+  org.chefx3d.view.awt.av3d \
+  org.chefx3d.toolbar.awt \
+  org.chefx3d.view.awt \
+  org.chefx3d.view.swt \
+  org.chefx3d.toolbar.swt \
+  org.chefx3d.property.swt \
+  org.chefx3d.catalog.util \
+  org.chefx3d.catalog.util.awt \
+  org.chefx3d.actions.awt \
+  org.chefx3d.cache.event \
+  org.chefx3d.cache \
+  org.chefx3d.cache.loader \
+  org.chefx3d.cache.content \
+  org.chefx3d.cache.protocol \
+  org.chefx3d.cache.javanet.protocol.http \
+  org.chefx3d.cache.javanet.protocol.https \
+  org.chefx3d.cache.protocol.http \
+  org.chefx3d.cache.protocol.https \
+  org.chefx3d.cache.protocol.jar \
+  
+# A version number we tack onto the JAR file name for eclipse versioning
+# purposes.
+JAR_VERSION=3.0.0
+
+# Names of JAR files we want to create
+JARS = chefx3d_all.jar \
+    chefx3d_core.jar
+
+# 3rd party libraries that need including.
+JARS_3RDPARTY=j3d-org.jar uri.jar vecmath.jar xj3d-all_2.0.0.jar
+
+# The list of other files we need to copy from this directory to the classes
+# directory when we are making JAR files.
+EXTRA =
+
+# Definitions of setup information if we are making a self-executable JAR
+MAIN_CLASS     =
+MAIN_PACKAGE   =
+MAIN_JAR       = chefx3d.jar
+
+#*********************************************************************
+#
+# Javadoc
+#
+#*********************************************************************
+
+OVERVIEW    = overview.html
+WINDOWTITLE = 'ChefX3D v2.0 Application Library'
+DOCTITLE    = 'ChefX3D v2.0 Code API'
+HEADER      = 'ChefX3D v2.0 Code API'
+BOTTOM      = '<font size=2>Copyright &copy; 2005 - 2007 \
+               <a href=\"http://www.web3d.org\">Web3D Consortium</a> \
+               </font>'
+
+# A list of the local directories that contain other Javadoc that we want
+# to link to. For example we link to the JDK, JAXP, SAI and JUnit Javadocs
+# here. Note that these *must* be full URLs and not just local directory
+# references. If your directory path contains a space in it, you may be in
+# trouble. We haven't tested it with that. Try using double quotes inside
+# the single quotes to get the space treated in the file name
+LINK_URLS   =
+
+include $(PROJECT_ROOT)/make/Makefile.jav

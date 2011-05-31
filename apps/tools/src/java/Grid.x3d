@@ -1,0 +1,16 @@
+<?xml version='1.0' encoding='UTF-8'?>
+<!DOCTYPE X3D PUBLIC "ISO//Web3D//DTD X3D 3.0//EN" "http://www.web3d.org/specifications/x3d-3.0.dtd">
+<X3D profile='Immersive' version='3.0'>
+<head>
+   <meta name='Shapeways Server Version' key='1.4.2.0'></meta></head>
+<Scene>
+      <Shape>
+         <Appearance>      
+            	 <Material emissiveColor='1.0 0.0 0.0' ></Material>
+      	 </Appearance>
+         <IndexedTriangleSet index='0 1 2 0 2 3 7 0 3 7 4 0 1 5 6 1 6 2 4 5 1 4 1 0 3 2 6 3 6 7 7 6 5 7 5 4'>
+            <Coordinate point='6.0 6.0 -10.0 ,-6.0 6.0 -10.0 ,-6.0 -6.0 -10.0 ,6.0 -6.0 -10.0 ,6.0 6.0 -10.0 ,-6.0 6.0 -10.0 ,-6.0 -6.0 -10.0,6.0 -6.0 -10.0'></Coordinate>
+         </IndexedTriangleSet>
+      </Shape>
+</Scene>
+</X3D>

@@ -1,0 +1,784 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2010
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+import java.util.ArrayList;
+import java.util.Arrays;
+
+//Internal Imports
+import org.chefx3d.model.AddEntityChildCommand;
+import org.chefx3d.model.AddEntityChildTransientCommand;
+import org.chefx3d.model.AddEntityCommand;
+import org.chefx3d.model.Command;
+import org.chefx3d.model.Entity;
+import org.chefx3d.model.LocationEntity;
+import org.chefx3d.model.MoveEntityCommand;
+import org.chefx3d.model.MoveEntityTransientCommand;
+import org.chefx3d.model.PositionableEntity;
+import org.chefx3d.model.RuleDataAccessor;
+import org.chefx3d.model.TransitionEntityChildCommand;
+import org.chefx3d.model.WorldModel;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+
+/**
+ * Provides shared initial position methods used by initial position correction
+ * classes. These classes take care of the missing response handling actions
+ * coming from the ChefX3D response classes. This allows for the separation
+ * between rules and ChefX3D, keeping rules as an independent accessory but not
+ * requisite for ChefX3D projects.
+ *
+ * The purpose of the initial position corrections are to handle any parenting
+ * and positioning needs of the incoming position related command. These are
+ * going to be either move or add related commands.
+ *
+ * @author Ben Yarger
+ * @version $Revision: 1.17 $
+ */
+public abstract class InitialPositionCorrectionRule extends SetRelativePositionRule {
+
+    protected static double EMBED_DEPTH = 0.0010;
+
+    /**
+     * Get the parent entity to reference for positioning. Start off with
+     * and evaluation of the current parent assigned to the entity. If this
+     * parent is not a legal one, then find one based on collision.
+     *
+     * Find the most appropriate parent based on legal collision, allowed
+     * parents and the shortest distance between entities. Will not return
+     * segments or zones as parent. If no other entities of type model are
+     * found in the collisions, null will be returned in which case the parent
+     * set in the command is the best one to use.
+     *
+     * @param command Command to check collisions with
+     * @param model World model to reference
+     * @return Best parent entity, or null if not found
+     */
+    protected Entity findAppropriateParent(
+            Command command,
+            WorldModel model) {
+
+        // The parent entity to return
+        Entity parentEntity = null;
+
+        //------------------------------------------------
+        // If the entity is an auto span, it should always
+        // parent to the active zone.
+        //------------------------------------------------
+        Entity entity = ((RuleDataAccessor)command).getEntity();
+
+        Boolean isAutoSpan = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.SPAN_OBJECT_PROP);
+
+        if (isAutoSpan) {
+            LocationEntity locationEntity = view.getActiveLocationEntity();
+            int activeZoneID = locationEntity.getActiveZoneID();
+            parentEntity = model.getEntity(activeZoneID);
+            return parentEntity;
+        }
+
+        //-------------------------------------------------
+        // See if a legal parent entity is already set and return it
+        //-------------------------------------------------
+//      if (isLegalParentSet(command, model)) {
+//
+//          parentEntity = getLegalParent(command, model);
+//          return parentEntity;
+//      }
+
+        //-------------------------------------------------
+        // Try to find a legal parent based on collision
+        //-------------------------------------------------
+        double[] currentPosition = new double[3];
+        float[] bounds = new float[6];
+        double[] testPosition = new double[3];
+
+        if (!(entity instanceof PositionableEntity)) {
+            return null;
+        }
+
+        ((PositionableEntity)entity).getBounds(bounds);
+
+        if (command instanceof MoveEntityCommand) {
+
+            ((MoveEntityCommand)command).getEndPosition(currentPosition);
+            testPosition[0] = currentPosition[0];
+            testPosition[1] = currentPosition[1];
+            testPosition[2] = currentPosition[2] - bounds[5] + bounds[4] + EMBED_DEPTH;
+            ((MoveEntityCommand)command).setEndPosition(testPosition);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            ((MoveEntityTransientCommand)command).getPosition(currentPosition);
+            testPosition[0] = currentPosition[0];
+            testPosition[1] = currentPosition[1];
+            testPosition[2] = currentPosition[2] - bounds[5] + bounds[4] + EMBED_DEPTH;
+            ((MoveEntityTransientCommand)command).setPosition(testPosition);
+
+        } else if (command instanceof TransitionEntityChildCommand) {
+
+            ((TransitionEntityChildCommand)command).getEndPosition(currentPosition);
+            testPosition[0] = currentPosition[0];
+            testPosition[1] = currentPosition[1];
+            testPosition[2] = currentPosition[2] - bounds[5] + bounds[4] + EMBED_DEPTH;
+            ((TransitionEntityChildCommand)command).setEndPosition(testPosition);
+
+        } else {
+
+            ((PositionableEntity)entity).getPosition(currentPosition);
+            testPosition[0] = currentPosition[0];
+            testPosition[1] = currentPosition[1];
+            testPosition[2] = currentPosition[2] - bounds[5] + bounds[4] + EMBED_DEPTH;
+            ((PositionableEntity)entity).setPosition(testPosition, false);
+
+        }
+
+        // The list of legal collisions
+        ArrayList<Entity> legalCollisions = new ArrayList<Entity>();
+
+        performCollisionCheck(command);
+
+        if (command instanceof MoveEntityCommand) {
+
+            ((MoveEntityCommand)command).setEndPosition(currentPosition);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            ((MoveEntityTransientCommand)command).setPosition(currentPosition);
+
+        } else if (command instanceof TransitionEntityChildCommand) {
+
+            ((TransitionEntityChildCommand)command).setEndPosition(currentPosition);
+
+        } else {
+
+            ((PositionableEntity)entity).setPosition(currentPosition, false);
+
+        }
+
+        if (collisionEntities == null) {
+            return null;
+        }
+
+        Entity commandEntity = ((RuleDataAccessor)command).getEntity();
+
+        String[] allowedParentClassifications = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    commandEntity,
+                    ChefX3DRuleProperties.ALLOWED_PARENT_CLASSIFICATIONS);
+
+        legalCollisions = getLegalParentCollisions(
+                model,
+                collisionEntities,
+                commandEntity,
+                allowedParentClassifications);
+
+        // Based on the legal collisions, find the closest one as the parent
+        if (legalCollisions != null && legalCollisions.size() > 0) {
+
+            parentEntity =
+                getClosestEntity(model, legalCollisions, commandEntity);
+
+        } else {
+
+            // We have ended up without any legal collisions to evaluate for a
+            // parent. So, we have to do a negative z nearest neighbor bounds
+            // check to see if there is anything behind the entity that is a
+            // legal parent.
+
+            // Start off by evaluating the most appropriate bounds data.
+            double[] pos = getPositionRelativeToZone(model, entity);
+
+            float[] extraBounds =
+                new float[] {
+                    0.0f,
+                    0.0f,
+                    ((float) pos[2] + 0.5f)};
+
+            ArrayList<Entity> negZNeighbors =
+                getNegativeZNeighbors(
+                    model,
+                    (PositionableEntity)entity,
+                    extraBounds);
+
+            // Get the possible legal collisions
+            legalCollisions =
+                getLegalParentCollisions(
+                        model,
+                        negZNeighbors,
+                        commandEntity,
+                        allowedParentClassifications);
+
+            // Get the closest parent
+            parentEntity =
+                getClosestEntity(model, legalCollisions, commandEntity);
+        }
+
+        return parentEntity;
+    }
+
+    /**
+     * Calculate the changes to the depth of the entity position based on the
+     * parent and the flags evaluated. Assumes the entity position relative
+     * to parent will be in a stacked position to start with.
+     *
+     * @param command Command to do collision check on
+     * @param model WorldModel to reference
+     * @param entity Entity to change position for
+     * @param parentEntity Parent to evaluate entity against
+     * @param entityPosition Position of entity to adjust
+     * @return depth change value (negative to move back towards zone)
+     */
+    protected double calculateDepthChanges(
+            Command command,
+            WorldModel model,
+            Entity entity,
+            Entity parentEntity) {
+
+        double depthChange = 0.0;
+
+        float[] entityBounds = new float[6];
+        float[] parentBounds = new float[6];
+
+        if (entity instanceof PositionableEntity &&
+                parentEntity instanceof PositionableEntity) {
+
+            ((PositionableEntity)entity).getBounds(entityBounds);
+            ((PositionableEntity)parentEntity).getBounds(parentBounds);
+
+        } else {
+            return depthChange;
+        }
+
+        // Set our parent is zone flag
+        boolean parentIsZone = false;
+
+        if (parentEntity.getType() == Entity.TYPE_SEGMENT ||
+                parentEntity.getType() == Entity.TYPE_ZONE) {
+            parentIsZone = true;
+        }
+
+        //--------------------------------
+        // Extract properties for analysis
+        //--------------------------------
+        Boolean placeInsideParent = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.PLACED_INSIDE_PARENT);
+
+        Float embedDepth = (Float)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.EMBED_DEPTH_PROP);
+
+        String[] allowedParentClassifications = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.ALLOWED_PARENT_CLASSIFICATIONS);
+
+        // If there are allowed parents in use, this is our flag to move back
+        // to be in collision with that parent.
+        if (allowedParentClassifications != null && !parentIsZone) {
+
+            // make sure the parentEntity matches the allowed classifications
+            String[] parentClassifications = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        parentEntity,
+                        ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+            boolean legalMatch = false;
+
+            if (parentClassifications != null) {
+
+                for (int i = 0; i < allowedParentClassifications.length; i++) {
+
+                    for (int j = 0; j < parentClassifications.length; j++) {
+
+                        if (allowedParentClassifications[i].equalsIgnoreCase(
+                                parentClassifications[j])) {
+
+                            legalMatch = true;
+                            break;
+                        }
+                    }
+
+                    if (legalMatch) {
+                        break;
+                    }
+                }
+            }
+
+            if (legalMatch) {
+
+                double[] zoneRelativeChildPos =
+                    getPositionRelativeToZone(model, command);
+
+                double[] zoneRelativeParentPos =
+                    getPositionRelativeToZone(model, parentEntity);
+
+                if (parentEntity.getType() != Entity.TYPE_MODEL) {
+                    zoneRelativeParentPos = new double[3];
+                    zoneRelativeParentPos[0] = 0.0;
+                    zoneRelativeParentPos[1] = 0.0;
+                    zoneRelativeParentPos[2] = 0.0;
+                }
+
+                depthChange =
+                    (zoneRelativeParentPos[2] + parentBounds[5]) -
+                    (zoneRelativeChildPos[2] + entityBounds[4]);
+            }
+        }
+
+        // Place inside parent. If depth of child is greater than parent,
+        // make sure child is pushed forward the difference. Otherwise zero
+        // out the relative z position.
+        if (placeInsideParent && !parentIsZone) {
+
+            // Only do this if the parent entity is a type model
+            if (parentEntity.getType() == Entity.TYPE_MODEL) {
+
+                // Push this forward some multiplier on the embed depth
+                // to make sure we put it in the parent, but not out the
+                // back or close enough to collide with anything behind
+                // the parent.
+                double[] zoneRelativeChildPos =
+                    getPositionRelativeToZone(model, command);
+
+                double[] zoneRelativeParentPos =
+                    getPositionRelativeToZone(model, parentEntity);
+
+                depthChange =
+                    zoneRelativeParentPos[2] - zoneRelativeChildPos[2];
+
+                // If the depth of the entity is greater than the depth of
+                // the parent then we have to move the entity forward
+                // enough so it wont stick out the back.
+                if (entityBounds[4] <= parentBounds[4]) {
+
+                    double oversizeAllowance =
+                        Math.abs(entityBounds[4]) -
+                        Math.abs(parentBounds[4]);
+
+                    depthChange += oversizeAllowance + EMBED_DEPTH;
+
+                }
+            }
+        }
+
+        // Make sure depth change is zero if parent is zone
+        if (parentIsZone) {
+
+            double[] zoneRelativeChildPos =
+                getPositionRelativeToZone(model, command);
+
+            if (zoneRelativeChildPos[2] + entityBounds[4] > 0.0){
+                depthChange =
+                    Math.abs(entityBounds[4]) - zoneRelativeChildPos[2];
+            } else {
+                depthChange = 0.0;
+            }
+        }
+
+        // Add in the custom embedDepth if set
+        if (embedDepth != null) {
+            depthChange = depthChange - embedDepth;// + EMBED_DEPTH;
+        } else {
+            depthChange = depthChange - EMBED_DEPTH;
+        }
+
+        return depthChange;
+    }
+
+    /**
+     * Certain types of models are embedded into the cut-outs
+     * in the segment, rather than being placed on the surface
+     * This should override the depth amount set as we assume
+     * doors and windows are being set into walls and can then
+     * easily determine what the actual depth value should be.
+     *
+     * @param entity Entity to examine
+     * @param position position of entity to adjust depth for
+     * @param isTransient Is the entity in a transient state
+     */
+    protected void handleDoorAndWindowCase(
+            Entity entity,
+            double[] position,
+            boolean isTransient) {
+
+        String category = entity.getCategory();
+
+        if ((category != null) && (
+            category.equals("Category.Window") ||
+            category.equals("Category.Door"))) {
+
+            Float embedDepth =
+                (Float)RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.EMBED_DEPTH_PROP);
+
+            if (embedDepth != null) {
+                if (isTransient) {
+                    position[2] = embedDepth - EMBED_DEPTH;
+                } else {
+                    position[2] = -embedDepth;
+                }
+            }
+        }
+    }
+
+    /**
+     * This method modifies the position parameter array.
+     *
+     * @param model
+     * @param command
+     * @param parent
+     * @param position
+     */
+    protected void fixPosition(
+            WorldModel model,
+            Command command,
+            Entity parent,
+            double[] position){
+
+        // First, get the position of the parent, which will also be
+        // relative to the wall segment
+        //
+        double[] parentPos = getPositionRelativeToZone(model, parent);
+//System.out.println("parent relToZone: " + java.util.Arrays.toString(parentPos));
+        //
+        // By subtracting the vector of the parent_position from the vector
+        // of the command_position, we will be left with a movement vector
+        // for the child that is relative to its parent
+        //
+        // Note that parent may actually _BE_ the wall, in which case
+        // the following addition will not change anything
+        //
+        position[0] -= parentPos[0];
+        position[1] -= parentPos[1];
+        position[2] -= parentPos[2];
+
+        //
+        // finally, call set relative position and re-add the parent vector
+        // back.  Now we finally have the correct command_position.
+        //
+        setRelativePosition(command, model, position, parent);
+//System.out.println("set Relative Pos: " + java.util.Arrays.toString(position));
+        position[0] += parentPos[0];
+        position[1] += parentPos[1];
+        position[2] += parentPos[2];
+//System.out.println("modified positi : " + java.util.Arrays.toString(position)+"\n");
+    }
+
+    //-------------------------------------------------------------------------
+    // Private methods
+    //-------------------------------------------------------------------------
+
+    /**
+     * Calculate the length of a vector.
+     *
+     * @param vec Vector in double[] x,y,z
+     * @return Length or -1.0 if unable to calculate
+     */
+    private double vecLength(double[] vec) {
+
+        if (vec == null || vec.length < 3){
+            return -1.0;
+        }
+
+        double xSqr = vec[0] * vec[0];
+        double ySqr = vec[1] * vec[1];
+        double zSqr = vec[2] * vec[2];
+
+        double vecLength = Math.sqrt(xSqr + ySqr + zSqr);
+
+        return vecLength;
+    }
+
+    /**
+     * See if the currently assigned parent is a legal parent.
+     *
+     * @param command Command to extract parent entity data from
+     * @param model World model to reference
+     * @return True if legal parent, false otherwise
+     */
+    private boolean isLegalParentSet(Command command, WorldModel model) {
+
+        Entity entity = ((RuleDataAccessor)command).getEntity();
+        Entity parentEntity = null;
+
+        if (command instanceof AddEntityChildCommand) {
+
+            parentEntity =
+                ((AddEntityChildCommand)command).getParentEntity();
+
+        } else if (command instanceof AddEntityCommand) {
+
+            int parentEntityID = entity.getParentEntityID();
+            parentEntity = model.getEntity(parentEntityID);
+
+        } else if (command instanceof AddEntityChildTransientCommand) {
+
+            parentEntity =
+                ((AddEntityChildTransientCommand)command).getParentEntity();
+
+        } else if (command instanceof MoveEntityCommand) {
+
+            int parentEntityID = entity.getParentEntityID();
+            parentEntity = model.getEntity(parentEntityID);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            int parentEntityID = entity.getParentEntityID();
+            parentEntity = model.getEntity(parentEntityID);
+
+        } else if (command instanceof TransitionEntityChildCommand) {
+
+            parentEntity =
+                ((TransitionEntityChildCommand)command).getEndParentEntity();
+
+        } else {
+
+            // Catch all
+            return false;
+        }
+
+        // Make sure we have a parent to evaluate
+        if (parentEntity == null) {
+            return false;
+        }
+
+        String[] allowedParentClassifications = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.ALLOWED_PARENT_CLASSIFICATIONS);
+
+        String[] collisionEntityClassifications = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    parentEntity,
+                    ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+        if (allowedParentClassifications != null &&
+                collisionEntityClassifications != null) {
+
+            for (int i = 0; i < allowedParentClassifications.length; i++) {
+
+                for (int j = 0; j < collisionEntityClassifications.length; j++) {
+
+                    if (allowedParentClassifications[i].equalsIgnoreCase(
+                            collisionEntityClassifications[j])){
+
+                        return true;
+                    }
+                }
+            }
+        } else if (allowedParentClassifications == null) {
+            // If there are no allowed parents set, allow
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Get the currently assigned parent.
+     *
+     * @param command Command to extract parent from
+     * @param model World model to reference
+     * @return Parent entity or null if not found
+     */
+    private Entity getLegalParent(Command command, WorldModel model) {
+
+        Entity entity = ((RuleDataAccessor)command).getEntity();
+        Entity parentEntity = null;
+
+        if (command instanceof AddEntityChildCommand) {
+
+            parentEntity =
+                ((AddEntityChildCommand)command).getParentEntity();
+
+        } else if (command instanceof AddEntityCommand) {
+
+            int parentEntityID = entity.getParentEntityID();
+            parentEntity = model.getEntity(parentEntityID);
+
+        } else if (command instanceof AddEntityChildTransientCommand) {
+
+            parentEntity =
+                ((AddEntityChildTransientCommand)command).getParentEntity();
+
+        } else if (command instanceof MoveEntityCommand) {
+
+            int parentEntityID = entity.getParentEntityID();
+            parentEntity = model.getEntity(parentEntityID);
+
+        } else if (command instanceof MoveEntityTransientCommand) {
+
+            int parentEntityID = entity.getParentEntityID();
+            parentEntity = model.getEntity(parentEntityID);
+
+        } else if (command instanceof TransitionEntityChildCommand) {
+
+            parentEntity =
+                ((TransitionEntityChildCommand)command).getEndParentEntity();
+
+        } else {
+
+            // Catch all
+            return null;
+        }
+
+        return parentEntity;
+
+    }
+
+    /**
+     * Get the legal parent collisions. Gives back a list of collisions that
+     * are appropriate for the given allowedParentClassifications.
+     *
+     * @param model WorldModel to reference
+     * @param baseSet Set of entities to consider
+     * @param commandEntity Entity being acted on by user
+     * @param allowedParentClassifications Allowed parent classifications
+     * @return List of legal parent entities, null if unknown
+     */
+    private ArrayList<Entity> getLegalParentCollisions(
+            WorldModel model,
+            ArrayList<Entity> baseSet,
+            Entity commandEntity,
+            String[] allowedParentClassifications) {
+
+        if (baseSet == null || baseSet.size() < 1) {
+            return null;
+        }
+
+        ArrayList<Entity> legalCollisions = new ArrayList<Entity>();
+
+        // Loop through the collisions, ignoring any non model types, and
+        // create a list of legal collisions.
+        for (int i = 0; i < baseSet.size(); i++) {
+
+            Entity collisionEntity = baseSet.get(i);
+
+            // Only operate on Entities of type Model.
+            if (collisionEntity.getType() != Entity.TYPE_MODEL) {
+                continue;
+            }
+
+            // Make sure we don't chose an entity that is parented to us
+            int testEntityParentID = collisionEntity.getParentEntityID();
+
+            while (testEntityParentID > 0) {
+
+                if (testEntityParentID == commandEntity.getEntityID()) {
+                    break;
+                }
+
+                Entity tmpEntity = model.getEntity(testEntityParentID);
+                testEntityParentID = tmpEntity.getParentEntityID();
+            }
+
+            if (testEntityParentID == commandEntity.getEntityID()) {
+                continue;
+            }
+
+            // If there are no parent classification limits, just add the
+            // collision entity to the list. Otherwise, continue to abide
+            // by the expressed requirement
+            if (allowedParentClassifications == null ||
+                    allowedParentClassifications.length < 1) {
+
+                legalCollisions.add(collisionEntity);
+                continue;
+            }
+
+            String[] collisionEntityClassifications = (String[])
+                RulePropertyAccessor.getRulePropertyValue(
+                        collisionEntity,
+                        ChefX3DRuleProperties.CLASSIFICATION_PROP);
+
+            if (collisionEntityClassifications != null) {
+                boolean matchFound = false;
+
+                // Check for a legal match of classification name and requirement
+                for (int j = 0; j < collisionEntityClassifications.length; j++) {
+
+                    for (int w = 0; w < allowedParentClassifications.length; w++) {
+
+                        if (collisionEntityClassifications[j].equalsIgnoreCase(
+                            allowedParentClassifications[w])) {
+
+                            legalCollisions.add(collisionEntity);
+                            matchFound = true;
+                            break;
+                        }
+                    }
+
+                    if (matchFound) {
+                        break;
+                    }
+                }
+            }
+        }
+
+        return legalCollisions;
+    }
+
+    /**
+     * Find the closest entity by distance to commandEntity.
+     *
+     * @param model WorldModel to reference
+     * @param entities List of entities to examine
+     * @param commandEntity Entity acted on by user
+     * @return Closest entity to commandEntity, null if unknown
+     */
+    private Entity getClosestEntity(
+            WorldModel model,
+            ArrayList<Entity> entities,
+            Entity commandEntity) {
+
+        if (entities == null || entities.size() < 1) {
+            return null;
+        }
+
+        double[] vec =
+            getDistanceBetweenEntities(
+                    model,
+                    entities.get(0),
+                    commandEntity);
+
+        double minLength = vecLength(vec);
+        Entity parentEntity = entities.get(0);
+
+        for (int i = 1; i < entities.size(); i++) {
+
+            vec =
+                getDistanceBetweenEntities(
+                        model,
+                        entities.get(i),
+                        commandEntity);
+
+            double tmpLength = vecLength(vec);
+
+            if (tmpLength < minLength) {
+                minLength = tmpLength;
+                parentEntity = entities.get(i);
+            }
+        }
+
+        return parentEntity;
+    }
+
+}

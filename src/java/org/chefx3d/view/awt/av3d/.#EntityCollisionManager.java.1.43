@@ -1,0 +1,1122 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.view.awt.av3d;
+
+// External imports
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Iterator;
+
+import javax.vecmath.AxisAngle4f;
+import javax.vecmath.Matrix4f;
+import javax.vecmath.Point3f;
+import javax.vecmath.Vector3f;
+
+import org.j3d.aviatrix3d.TransformGroup;
+
+// Local imports
+import org.chefx3d.model.AddEntityCommand;
+import org.chefx3d.model.AddEntityChildCommand;
+import org.chefx3d.model.AddEntityChildTransientCommand;
+import org.chefx3d.model.Command;
+import org.chefx3d.model.ContentContainerEntity;
+import org.chefx3d.model.Entity;
+import org.chefx3d.model.ChangePropertyCommand;
+import org.chefx3d.model.ChangePropertyTransientCommand;
+import org.chefx3d.model.ListProperty;
+import org.chefx3d.model.MoveEntityCommand;
+import org.chefx3d.model.MoveEntityTransientCommand;
+import org.chefx3d.model.MoveSegmentCommand;
+import org.chefx3d.model.MoveSegmentTransientCommand;
+import org.chefx3d.model.MoveVertexCommand;
+import org.chefx3d.model.MoveVertexTransientCommand;
+import org.chefx3d.model.PositionableEntity;
+import org.chefx3d.model.RemoveEntityChildCommand;
+import org.chefx3d.model.RemoveEntityCommand;
+import org.chefx3d.model.RemoveSegmentCommand;
+import org.chefx3d.model.RemoveVertexCommand;
+import org.chefx3d.model.RotateEntityCommand;
+import org.chefx3d.model.RotateEntityTransientCommand;
+import org.chefx3d.model.RuleDataAccessor;
+import org.chefx3d.model.ScaleEntityCommand;
+import org.chefx3d.model.ScaleEntityTransientCommand;
+import org.chefx3d.model.SegmentEntity;
+import org.chefx3d.model.TransitionEntityChildCommand;
+import org.chefx3d.model.VertexEntity;
+import org.chefx3d.model.WorldModel;
+
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+
+import org.chefx3d.util.ApplicationParams;
+import org.chefx3d.util.DefaultErrorReporter;
+import org.chefx3d.util.ErrorReporter;
+import org.chefx3d.util.FileLoader;
+
+import org.chefx3d.view.awt.scenemanager.SceneManagerObserver;
+
+/**
+ * Manager for rule based collision detection.
+ *
+ * @author Rex Melton
+ * @version $Revision: 1.43 $
+ */
+class EntityCollisionManager implements RuleCollisionChecker {
+
+    /** The scene manager Observer*/
+    private SceneManagerObserver mgmtObserver;
+
+    /** The world model */
+    private WorldModel model;
+
+    /** The error reporter to log to */
+    private ErrorReporter reporter;
+
+    /** Model loader */
+    private AV3DLoader modelLoader;
+
+    /** Utility to resolve urls */
+    private FileLoader urlResolver;
+
+    /** Working objects */
+    private Matrix4f activeMatrix;
+
+    /** Scratch objects used for transform calculations */
+    private Vector3f translation;
+    private AxisAngle4f rotation;
+    private Point3f pnt;
+
+    private double[] pos_array;
+    private float[] rot_array;
+    private float[] scl_array;
+    private float[] size_array;
+    private float[] vtx0;
+    private float[] vtx1;
+
+    /** Bound extents */
+    private float[] min;
+    private float[] max;
+
+    /** The bounds of the entity being manipulated */
+    private OrientedBoundingBox activeBounds;
+
+    /** Handler for all segment bounds */
+    private SegmentBoundingBox seg_bb;
+
+    /** Scratch bounds used during intersection testing */
+    private OrientedBoundingBox obb;
+
+    /** Local transformation utils */
+    private TransformUtils tu;
+    private Matrix4f mtx;
+
+    /** The manager of the entities to be handled */
+    private AV3DEntityManager entityManager;
+
+    /** The map of entity wrappers */
+    private HashMap<Integer, AV3DEntityWrapper> wrapperMap;
+
+    /** The working parent entity wrapper */
+    private AV3DEntityWrapper parentWrapper;
+
+    /** Enable flag for debug messages */
+    private boolean debug;
+
+    /** Bounds to geometry intersection testing */
+    private IntersectionUtils isect;
+
+    /** The map of surrogate entity wrappers */
+    private HashMap<Integer, SurrogateEntityWrapper> surrogateMap;
+
+    /** Map entity wrappers of various sorts */
+    private HashMap<Integer, EntityWrapper> combinedWrapperMap;
+
+    /**
+     * Package visibility Constructor
+     *
+     * @param model The WorldModel
+     * @param mgmtObserver The SceneManagerObserver
+     * @param reporter The ErrorReporter instance to use
+     */
+    EntityCollisionManager(
+        WorldModel worldModel,
+        SceneManagerObserver sceneMgmtObserver,
+        ErrorReporter errorReporter) {
+
+        model = worldModel;
+        mgmtObserver = sceneMgmtObserver;
+        reporter = (errorReporter != null) ?
+            errorReporter : DefaultErrorReporter.getDefaultReporter();
+
+        modelLoader = new AV3DLoader();
+        urlResolver = new FileLoader();
+
+        tu = new TransformUtils();
+        mtx = new Matrix4f();
+        pnt = new Point3f();
+
+        activeMatrix = new Matrix4f();
+        translation = new Vector3f();
+        rotation = new AxisAngle4f();
+
+        pos_array = new double[3];
+        rot_array = new float[4];
+        scl_array = new float[3];
+        size_array = new float[3];
+        vtx0 = new float[3];
+        vtx1 = new float[3];
+
+        min = new float[3];
+        max = new float[3];
+
+        obb = new OrientedBoundingBox();
+        seg_bb = new SegmentBoundingBox();
+
+        Boolean dbg = (Boolean)ApplicationParams.get(ApplicationParams.DEBUG_MODE);
+        if (dbg != null) {
+            debug = dbg;
+        }
+
+        isect = new IntersectionUtils();
+
+        surrogateMap = new HashMap<Integer, SurrogateEntityWrapper>();
+        combinedWrapperMap = new HashMap<Integer, EntityWrapper>();
+    }
+
+    //----------------------------------------------------------
+    // Methods define by RuleCollisionChecker
+    //----------------------------------------------------------
+
+    /**
+     * Submit a command to the collision detection system for
+     * processing and return a list of Entities that the
+     * Command's Entity is in collision with. If no collisions
+     * are occurring, an empty list is returned.
+     *
+     * @param command The Command to test
+     * @return The list of Entities in collision.
+     */
+    public ArrayList<Entity> submitCommand(Command command) {
+        return(submitCommand(command, true));
+    }
+
+    /**
+     * Submit a command to the collision detection system for
+     * processing and return a list of Entities that the
+     * Command's Entity is in collision with. If no collisions
+     * are occurring, null is returned.
+     *
+     * @param command The Command to test
+     * @param useSurrogates Flag indicating that surrogate entities should
+     * be used during collision testing.
+     * @return The list of Entities in collision, or null.
+     */
+    public ArrayList<Entity> submitCommand(Command command, boolean useSurrogates) {
+
+        ArrayList<Entity> results = new ArrayList<Entity>();
+
+        if (command instanceof RuleDataAccessor) {
+
+            RuleDataAccessor rda = (RuleDataAccessor)command;
+            Entity entity = rda.getEntity();
+
+            if(!validate(command, entity)) {
+                return(results);
+            }
+
+            parentWrapper = getParentWrapper(command, entity);
+
+            setActiveBounds(entity);
+            configActiveBounds(command, entity);
+            int sourceType = entity.getType();
+            boolean sourceIsZone = (sourceType == Entity.TYPE_ZONE) |
+                (sourceType == Entity.TYPE_SEGMENT);
+
+            if (debug) {
+                System.out.println("******** Collision set *********");
+            }
+
+            boolean colPosReq = getBoolean(
+                entity,
+                ChefX3DRuleProperties.COLLISION_POSITION_REQUIREMENTS);
+
+            int entityID = entity.getEntityID();
+
+            HashMap<Integer, EntityWrapper> map = getWrapperMap(useSurrogates);
+            for (Iterator<Integer> i = map.keySet().iterator();
+                i.hasNext();) {
+
+                int id = i.next();
+                if (id != entityID) {
+
+                    EntityWrapper targetWrapper = map.get(id);
+                    Entity targetEntity = targetWrapper.getEntity();
+                    int targetType = targetEntity.getType();
+
+                    boolean targetIsZone = (targetType == Entity.TYPE_ZONE) |
+                        (targetType == Entity.TYPE_SEGMENT);
+
+                    OrientedBoundingBox bounds = null;
+                    if (colPosReq) {
+                        bounds = targetWrapper.getExtendedBounds();
+                    } else {
+                        bounds = targetWrapper.getBounds();
+                    }
+                    AV3DEntityWrapper av3dWrapper = null;
+                    if (targetWrapper instanceof AV3DEntityWrapper) {
+                        av3dWrapper = (AV3DEntityWrapper)targetWrapper;
+                        tu.getLocalToVworld(av3dWrapper.transformGroup, mtx);
+                        bounds.transform(mtx);
+                    }
+
+                    boolean useEpsilon = sourceIsZone | targetIsZone;
+                    if (activeBounds.intersect(bounds, useEpsilon)) {
+
+                        boolean intersectionFound = true;
+                        if (targetIsZone) {
+                            // check bounds against zone geometry
+                            intersectionFound = isect.check(activeBounds, av3dWrapper, useEpsilon);
+                            if (debug) {
+                                System.out.println("Intersection: "+ getIdentifier(targetEntity)
+                                    +": "+ intersectionFound);
+                            }
+                        }
+                        if (intersectionFound) {
+                            if (results == null) {
+                                results = new ArrayList<Entity>();
+                            }
+                            if (debug) {
+                                System.out.println("Collision: "+ getIdentifier(targetEntity));
+                            }
+                            results.add(targetEntity);
+                        }
+                    }
+                }
+            }
+        }
+        parentWrapper = null;
+
+        if (debug) System.out.println("  #Collisions: " + results.size());
+        return(results);
+    }
+
+    /////////////////////////////////////////////////////////////////////////////////////
+    // test for the extended method
+    /*
+    public ArrayList<Entity> submitCommand(Command command) {
+        if (command instanceof RuleDataAccessor) {
+
+            RuleDataAccessor rda = (RuleDataAccessor)command;
+            Entity entity = rda.getEntity();
+
+            Map<Entity, ArrayList<Entity>> result_map = submitCommandExtended(command);
+
+            ArrayList<Entity> result_list = result_map.get(entity);
+            return(result_list);
+        } else {
+            return(new ArrayList<Entity>());
+        }
+    }
+    */
+    /////////////////////////////////////////////////////////////////////////////////////
+
+    /**
+     * Submit a command to the collision detection system for
+     * processing. A Map will be returned that contains a list of
+     * colliding Entities for the Entity that is the subject of the
+     * Command, as well as for any children Entities of the Command
+     * Entity. If no collisions are found the list will be empty for
+     * that Entity.
+     *
+     * @param command The Command to test
+     * @return The Map of Entities in collision.
+     */
+    public Map<Entity, ArrayList<Entity>> submitCommandExtended(Command command) {
+
+        HashMap<Entity, ArrayList<Entity>> results =
+            new HashMap<Entity, ArrayList<Entity>>();
+
+        if (command instanceof RuleDataAccessor) {
+
+            RuleDataAccessor rda = (RuleDataAccessor)command;
+            Entity entity = rda.getEntity();
+
+            if(!validate(command, entity)) {
+                return(results);
+            }
+
+            parentWrapper = getParentWrapper(command, entity);
+
+            setActiveBounds(entity);
+            configActiveBounds(command, entity);
+
+            ContentContainerEntity cce = entityManager.getContentContainerEntity();
+
+            // transform the bounds of each entity in the hierarchy,
+            // excluding the source entity and it's children
+            configBoundsFromSceneGraph(cce, entity);
+
+            // transform the bounds of the target entity's children
+            configBoundsFromMatrix(entity, activeMatrix);
+
+            ArrayList<Entity> sourceList = new ArrayList<Entity>();
+            sourceList.add(entity);
+            getChildren(entity, sourceList);
+
+            boolean colPosReq = getBoolean(
+                entity,
+                ChefX3DRuleProperties.COLLISION_POSITION_REQUIREMENTS);
+
+            for (int x = 0; x < sourceList.size(); x++) {
+
+                Entity source = sourceList.get(x);
+                OrientedBoundingBox sourceBounds = null;
+
+                if (source == entity) {
+                    sourceBounds = activeBounds;
+                } else {
+                    int sourceID = source.getEntityID();
+                    AV3DEntityWrapper sourceWrapper = wrapperMap.get(sourceID);
+                    sourceBounds = sourceWrapper.getBounds();
+                }
+
+                int sourceType = source.getType();
+                boolean sourceIsZone = (sourceType == Entity.TYPE_ZONE) |
+                    (sourceType == Entity.TYPE_SEGMENT);
+
+                if (debug) {
+                    System.out.println("******** Extended Collision set *********");
+                }
+
+                ArrayList<Entity> collisionList = new ArrayList<Entity>();
+                results.put(source, collisionList);
+
+                for (Iterator<AV3DEntityWrapper> i = wrapperMap.values().iterator();
+                    i.hasNext();) {
+
+                    AV3DEntityWrapper wrapper = i.next();
+                    if (wrapper.entity != source) {
+
+                        if (results.containsKey(wrapper.entity)) {
+                            // this entity has already been tested for
+                            // collisions skip the intersection test
+                            // and check the previous results.
+                            ArrayList<Entity> list = results.get(wrapper.entity);
+                            if (list.contains(source)) {
+                                collisionList.add(wrapper.entity);
+                            }
+                            continue;
+                        }
+
+                        int type = wrapper.entity.getType();
+
+                        boolean targetIsZone = (type == Entity.TYPE_ZONE) |
+                            (type == Entity.TYPE_SEGMENT);
+
+                        OrientedBoundingBox bounds = null;
+                        if (colPosReq) {
+                            bounds = wrapper.getExtendedBounds();
+                        } else {
+                            bounds = wrapper.getBounds();
+                        }
+                        boolean useEpsilon = sourceIsZone | targetIsZone;
+                        if (sourceBounds.intersect(bounds, useEpsilon)) {
+
+                            boolean intersectionFound = true;
+                            if (targetIsZone) {
+                                // check bounds against zone geometry
+                                intersectionFound = isect.check(sourceBounds, wrapper, useEpsilon);
+                                if (debug) {
+                                    System.out.println("Intersection:  src = "+ getIdentifier(source) +
+                                        ", target = "+ getIdentifier(wrapper.entity) +": "+ intersectionFound);
+                                }
+                            }
+                            if (intersectionFound) {
+                                if (debug) {
+                                    System.out.println("Collision: src = "+ getIdentifier(source) +
+                                        ", target = "+ getIdentifier(wrapper.entity));
+                                }
+                                collisionList.add(wrapper.entity);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        parentWrapper = null;
+        return(results);
+    }
+
+    /**
+     * Print the current active bounds and collision data
+     */
+    public void printState() {
+
+        System.out.println(activeBounds.toString());
+        System.out.println("    position: " + java.util.Arrays.toString(pos_array));
+        System.out.println("    rot_array: " + java.util.Arrays.toString(rot_array));
+        System.out.println("    scl_array: " + java.util.Arrays.toString(scl_array));
+
+    }
+
+    /**
+     * Add a surrogate to the working set
+     *
+     * @param surrogate The SurrogateEntityWrapper to add
+     */
+    public void addSurrogate(SurrogateEntityWrapper surrogate) {
+        int id = surrogate.getEntity().getEntityID();
+        surrogateMap.put(id, surrogate);
+
+        int parentID = surrogate.getParentEntity().getEntityID();
+        AV3DEntityWrapper pw = wrapperMap.get(parentID);
+
+        // configure the surrogate transform matrix
+        surrogate.getPosition(pos_array);
+        surrogate.getRotation(rot_array);
+
+        rotation.set(rot_array);
+        translation.set((float)pos_array[0], (float)pos_array[1], (float)pos_array[2]);
+
+        Matrix4f smtx = new Matrix4f();
+        smtx.setIdentity();
+        smtx.setRotation(rotation);
+        smtx.setTranslation(translation);
+
+        tu.getLocalToVworld(pw.transformGroup, mtx);
+        smtx.mul(mtx, smtx);
+
+        OrientedBoundingBox bounds = surrogate.getBounds();
+        bounds.transform(smtx);
+
+        OrientedBoundingBox ex_bounds = surrogate.getExtendedBounds();
+        if (ex_bounds != bounds) {
+            ex_bounds.transform(smtx);
+        }
+    }
+
+    /**
+     * Remove a surrogate from the working set
+     *
+     * @param surrogate The SurrogateEntityWrapper to remove
+     */
+    public void removeSurrogate(SurrogateEntityWrapper surrogate) {
+        int id = surrogate.getEntity().getEntityID();
+        surrogateMap.remove(id);
+    }
+
+    /**
+     * Clear the surrogate working set
+     */
+    public void clearSurrogates() {
+        surrogateMap.clear();
+    }
+
+    //----------------------------------------------------------
+    // Local Methods
+    //----------------------------------------------------------
+
+    /**
+     * Set the active entity manager
+     *
+     * @param entityManager The active entity manager
+     */
+    void setEntityManager(AV3DEntityManager entityManager) {
+        this.entityManager = entityManager;
+        if (entityManager != null) {
+            wrapperMap = entityManager.getEntityWrapperMap();
+        } else {
+            wrapperMap = null;
+        }
+    }
+
+    /**
+     * Retrieve the model from the specified url
+     *
+     * @param entity The entity to create a proxy model for
+     */
+    private void setActiveBounds(Entity entity) {
+
+        Entity sceneEntity = model.getEntity(entity.getEntityID());
+        boolean useWrapperMap = true;
+
+        /*
+         * BJY: Check the model url of the incoming entity and the one already
+         * in the scene. If they are not the same then we have a replacement
+         * for the existing entity and we should not use the side pocketed
+         * bounds data for the existing entity in the collision check.
+         */
+        if(sceneEntity != null){
+
+            String incomingURL = entity.getModelURL();
+            String existingURL = sceneEntity.getModelURL();
+
+            if(incomingURL == null && existingURL != null){
+
+                useWrapperMap = false;
+
+            } else if (incomingURL != null && existingURL == null) {
+
+                useWrapperMap = false;
+
+            } else if (incomingURL == null && existingURL == null) {
+
+                useWrapperMap = true;
+
+            } else if(!incomingURL.equals(existingURL)){
+
+                useWrapperMap = false;
+            }
+        }
+
+        if (entity instanceof SegmentEntity) {
+            // use the shared bounds object from segment handler
+            activeBounds = seg_bb;
+
+        } else {
+
+            activeBounds = obb;
+            int entityID = entity.getEntityID();
+            if (useWrapperMap && wrapperMap.containsKey(entityID)) {
+                // the entity already exists, clone it's bounds
+                // object to use
+                AV3DEntityWrapper wrapper = wrapperMap.get(entityID);
+                OrientedBoundingBox bounds = wrapper.getBounds();
+                activeBounds.copy(bounds);
+
+            } else {
+                if (entity instanceof PositionableEntity) {
+
+                    // a new entity, create a bounds object to use
+                    // and queue up a load of it's geometry
+                    PositionableEntity pe = (PositionableEntity)entity;
+
+                    pe.getSize(size_array);
+                    pe.getScale(scl_array);
+
+                    max[0] = size_array[0]/2;
+                    max[1] = size_array[1]/2;
+                    max[2] = size_array[2]/2;
+
+                    min[0] = -max[0];
+                    min[1] = -max[1];
+                    min[2] = -max[2];
+
+                    activeBounds.setVertices(min, max);
+                    activeBounds.setScale(scl_array);
+
+                    // TODO: we could check the cache for the item and load
+                    // it.  loading from the network would be too slow.
+
+                } else {
+                    // rem: tmp debug println
+                    System.out.println("ECM: Not a PositionableEntity");
+                }
+            }
+        }
+    }
+
+    /**
+     * Calculate where the entity's geometry will be after the
+     * command has been executed.
+     *
+     * @param command The command that is transforming the entity
+     * @param entity The entity that is being transformed
+     */
+    private void configActiveBounds(Command command, Entity entity) {
+
+        TransformGroup parentTransformGroup = null;
+        // special case for segments
+        if (command instanceof MoveSegmentCommand) {
+
+            MoveSegmentCommand msc = (MoveSegmentCommand)command;
+
+            SegmentEntity segment = (SegmentEntity)msc.getEntity();
+
+            // Get the wall thickness
+            Object prop = segment.getProperty(
+                    Entity.EDITABLE_PROPERTIES,
+                    SegmentEntity.WALL_THICKNESS_PROP);
+
+            float wallThickness = SegmentEntity.DEFAULT_WALL_THICKNESS;
+            if (prop instanceof ListProperty) {
+                ListProperty list = (ListProperty)prop;
+                wallThickness = Float.parseFloat(list.getSelectedValue());
+            }
+
+            VertexEntity ve0 = segment.getEndVertexEntity();
+            float height0 = (Float)ve0.getHeight();
+
+            VertexEntity ve1 = segment.getStartVertexEntity();
+            float height1 = (Float)ve1.getHeight();
+
+            float height = Math.max(height0, height1);
+
+            SegmentEntityWrapper sew =
+                (SegmentEntityWrapper)wrapperMap.get(segment.getEntityID());
+            parentTransformGroup =
+                sew.getSegmentDetails().getParent();
+            tu.getLocalToVworld(parentTransformGroup, mtx);
+            mtx.invert();
+
+            // the start (or left) vertex position
+            msc.getStartVertexEndPosition(pos_array);
+            vtx0[0] = (float)pos_array[0];
+            vtx0[1] = (float)pos_array[1];
+            vtx0[2] = (float)pos_array[2];
+            pnt.set(vtx0);
+            mtx.transform(pnt);
+            pnt.get(vtx0);
+
+            // the end (or right) vertex position
+            msc.getEndVertexEndPosition(pos_array);
+            vtx1[0] = (float)pos_array[0];
+            vtx1[1] = (float)pos_array[1];
+            vtx1[2] = (float)pos_array[2];
+            pnt.set(vtx1);
+            mtx.transform(pnt);
+            pnt.get(vtx1);
+
+            // get the local transform for the segment bounds
+            seg_bb.update(vtx0, vtx1, height, wallThickness);
+            seg_bb.getMatrix(activeMatrix);
+
+        } else if (command instanceof MoveSegmentTransientCommand) {
+
+            MoveSegmentTransientCommand mstc = (MoveSegmentTransientCommand)command;
+
+            SegmentEntity segment = (SegmentEntity)mstc.getEntity();
+
+            // Get the wall thickness
+            Object prop = segment.getProperty(
+                    Entity.EDITABLE_PROPERTIES,
+                    SegmentEntity.WALL_THICKNESS_PROP);
+
+            float wallThickness = SegmentEntity.DEFAULT_WALL_THICKNESS;
+            if (prop instanceof ListProperty) {
+                ListProperty list = (ListProperty)prop;
+                wallThickness = Float.parseFloat(list.getSelectedValue());
+            }
+
+            VertexEntity ve0 = segment.getEndVertexEntity();
+            float height0 = ve0.getHeight();
+
+            VertexEntity ve1 = segment.getStartVertexEntity();
+            float height1 = (Float)ve1.getHeight();
+
+            float height = Math.max(height0, height1);
+
+            SegmentEntityWrapper sew =
+                (SegmentEntityWrapper)wrapperMap.get(segment.getEntityID());
+            parentTransformGroup =
+                sew.getSegmentDetails().getParent();
+            tu.getLocalToVworld(parentTransformGroup, mtx);
+            mtx.invert();
+
+            // the start (or left) vertex position
+            mstc.getStartVertexEndPosition(pos_array);
+            vtx0[0] = (float)pos_array[0];
+            vtx0[1] = (float)pos_array[1];
+            vtx0[2] = (float)pos_array[2];
+            pnt.set(vtx0);
+            mtx.transform(pnt);
+            pnt.get(vtx0);
+
+            // the end (or right) vertex position
+            mstc.getEndVertexEndPosition(pos_array);
+            vtx1[0] = (float)pos_array[0];
+            vtx1[1] = (float)pos_array[1];
+            vtx1[2] = (float)pos_array[2];
+            pnt.set(vtx1);
+            mtx.transform(pnt);
+            pnt.get(vtx1);
+
+            // get the local transform for the segment bounds
+            seg_bb.update(vtx0, vtx1, height, wallThickness);
+            seg_bb.getMatrix(activeMatrix);
+
+        } else if (command instanceof RemoveSegmentCommand){
+
+            RemoveSegmentCommand rsc = (RemoveSegmentCommand)command;
+
+            SegmentEntity segment = (SegmentEntity)rsc.getEntity();
+
+            // Get the wall thickness
+            Object prop = segment.getProperty(
+                    Entity.EDITABLE_PROPERTIES,
+                    SegmentEntity.WALL_THICKNESS_PROP);
+
+            float wallThickness = SegmentEntity.DEFAULT_WALL_THICKNESS;
+            if (prop instanceof ListProperty) {
+                ListProperty list = (ListProperty)prop;
+                wallThickness = Float.parseFloat(list.getSelectedValue());
+            }
+
+            VertexEntity ve0 = segment.getEndVertexEntity();
+            float height0 = ve0.getHeight();
+
+            VertexEntity ve1 = segment.getStartVertexEntity();
+            float height1 = (Float)ve1.getHeight();
+
+            float height = Math.max(height0, height1);
+
+            SegmentEntityWrapper sew =
+                (SegmentEntityWrapper)wrapperMap.get(segment.getEntityID());
+            parentTransformGroup =
+                sew.getSegmentDetails().getParent();
+            tu.getLocalToVworld(parentTransformGroup, mtx);
+            mtx.invert();
+
+            // the start (or left) vertex position
+            segment.getStartVertexEntity().getPosition(pos_array);
+            vtx0[0] = (float)pos_array[0];
+            vtx0[1] = (float)pos_array[1];
+            vtx0[2] = (float)pos_array[2];
+            pnt.set(vtx0);
+            mtx.transform(pnt);
+            pnt.get(vtx0);
+
+            // the end (or right) vertex position
+            segment.getEndVertexEntity().getPosition(pos_array);
+            vtx1[0] = (float)pos_array[0];
+            vtx1[1] = (float)pos_array[1];
+            vtx1[2] = (float)pos_array[2];
+            pnt.set(vtx1);
+            mtx.transform(pnt);
+            pnt.get(vtx1);
+
+            // get the local transform for the segment bounds
+            seg_bb.update(vtx0, vtx1, height, wallThickness);
+            seg_bb.getMatrix(activeMatrix);
+
+        } else {
+
+            // get the starting transformation
+            PositionableEntity pe = (PositionableEntity)entity;
+            pe.getPosition(pos_array);
+            pe.getRotation(rot_array);
+            pe.getScale(scl_array);
+
+            // overide with the new data from the command
+            String propertyName = null;
+            Object value = null;
+            if (command instanceof MoveEntityCommand) {
+                ((MoveEntityCommand)command).getEndPosition(pos_array);
+            } else if (command instanceof MoveEntityTransientCommand) {
+                ((MoveEntityTransientCommand)command).getPosition(pos_array);
+            } else if (command instanceof RotateEntityCommand) {
+                ((RotateEntityCommand)command).getCurrentRotation(rot_array);
+            } else if (command instanceof RotateEntityTransientCommand) {
+                ((RotateEntityTransientCommand)command).getCurrentRotation(rot_array);
+            } else if (command instanceof ChangePropertyCommand) {
+                ChangePropertyCommand cpc = (ChangePropertyCommand)command;
+                propertyName = cpc.getPropertyName();
+                value = cpc.getPropertyValue();
+            } else if (command instanceof ChangePropertyTransientCommand) {
+                ChangePropertyTransientCommand cptc = (ChangePropertyTransientCommand)command;
+                propertyName = cptc.getPropertyName();
+                value = cptc.getPropertyValue();
+            } else if (command instanceof MoveVertexCommand) {
+                ((MoveVertexCommand)command).getEndPosition(pos_array);
+            } else if (command instanceof MoveVertexTransientCommand) {
+                ((MoveVertexTransientCommand)command).getPosition(pos_array);
+            } else if (command instanceof ScaleEntityCommand) {
+                ((ScaleEntityCommand)command).getNewPosition(pos_array);
+                ((ScaleEntityCommand)command).getNewScale(scl_array);
+            } else if (command instanceof ScaleEntityTransientCommand) {
+                ((ScaleEntityTransientCommand)command).getPosition(pos_array);
+                ((ScaleEntityTransientCommand)command).getScale(scl_array);
+            } else if (command instanceof TransitionEntityChildCommand){
+                ((TransitionEntityChildCommand)command).getEndPosition(pos_array);
+                ((TransitionEntityChildCommand)command).getEndScale(scl_array);
+
+                Entity endParentEntity =
+                    ((TransitionEntityChildCommand)command).getEndParentEntity();
+
+                parentWrapper = wrapperMap.get(endParentEntity.getEntityID());
+            }
+
+            // note: AddEntityChildCommand & AddChildCommand check only
+            // with the initial transformational values.
+
+            if (propertyName != null) {
+                if (propertyName.equals(PositionableEntity.POSITION_PROP)) {
+                    double[] value_d = (double[])value;
+                    pos_array[0] = value_d[0];
+                    pos_array[1] = value_d[1];
+                    pos_array[2] = value_d[2];
+                } else if (propertyName.equals(PositionableEntity.ROTATION_PROP)) {
+                    float[] value_f = (float[])value;
+                    rot_array[0] = value_f[0];
+                    rot_array[1] = value_f[1];
+                    rot_array[2] = value_f[2];
+                    rot_array[3] = value_f[3];
+                } else if (propertyName.equals(PositionableEntity.SCALE_PROP)) {
+                    float[] value_f = (float[])value;
+                    scl_array[0] = value_f[0];
+                    scl_array[1] = value_f[1];
+                    scl_array[2] = value_f[2];
+                }
+            }
+
+            // configure the bounds scale
+            activeBounds.setScale(scl_array);
+
+            // configure the transform matrix
+            rotation.set(rot_array);
+            translation.set((float)pos_array[0], (float)pos_array[1], (float)pos_array[2]);
+
+            activeMatrix.setIdentity();
+            activeMatrix.setRotation(rotation);
+            activeMatrix.setTranslation(translation);
+
+            if (parentWrapper != null) {
+                parentTransformGroup = parentWrapper.transformGroup;
+            }
+        }
+
+        // transform into world
+        if (parentTransformGroup != null) {
+            tu.getLocalToVworld(parentTransformGroup, mtx);
+            activeMatrix.mul(mtx, activeMatrix);
+        }
+        activeBounds.transform(activeMatrix);
+    }
+
+    /**
+     * Determine whether the command and entity types can be processed
+     *
+     * @param command The Command instance
+     * @param entity The Entity being acted upon by the Command
+     * @return true if the command can be processed, false otherwise
+     */
+    private boolean validate(Command command, Entity entity) {
+
+        boolean cmdStatus = false;
+
+        // check the command types
+        if (command instanceof MoveEntityCommand) {
+            cmdStatus = true;
+        } else if (command instanceof MoveEntityTransientCommand) {
+            cmdStatus = true;
+        } else if (command instanceof RotateEntityCommand) {
+            cmdStatus = true;
+        } else if (command instanceof RotateEntityTransientCommand) {
+            cmdStatus = true;
+        } else if (command instanceof ChangePropertyCommand) {
+            cmdStatus = true;
+        } else if (command instanceof ChangePropertyTransientCommand) {
+            cmdStatus = true;
+        } else if (command instanceof AddEntityChildCommand) {
+            cmdStatus = true;
+        } else if (command instanceof AddEntityCommand) {
+            cmdStatus = true;
+        } else if (command instanceof MoveSegmentCommand) {
+            cmdStatus = true;
+        } else if (command instanceof MoveSegmentTransientCommand) {
+            cmdStatus = true;
+        } else if (command instanceof MoveVertexCommand) {
+          cmdStatus = true;
+        } else if (command instanceof MoveVertexTransientCommand) {
+          cmdStatus = true;
+        } else if (command instanceof ScaleEntityCommand) {
+          cmdStatus = true;
+        } else if (command instanceof ScaleEntityTransientCommand) {
+          cmdStatus = true;
+        } else if (command instanceof TransitionEntityChildCommand) {
+            cmdStatus = true;
+        } else if (command instanceof RemoveEntityCommand) {
+            cmdStatus = true;
+        } else if (command instanceof RemoveEntityChildCommand){
+            cmdStatus = true;
+        } else if (command instanceof RemoveSegmentCommand){
+            cmdStatus = true;
+        }
+
+        if (!cmdStatus) {
+            return(false);
+        }
+        // check the entity types
+        int type = entity.getType();
+        if ((type == Entity.TYPE_MODEL) || (type == Entity.TYPE_SEGMENT) ||
+            (type == Entity.TYPE_VERTEX)) {
+
+            return(true);
+        } else {
+            return(false);
+        }
+    }
+
+    /**
+     * Return the wrapper for the parent of the Command's Entity
+     *
+     * @param command The Command
+     * @param entity The Entity referenced by the Command
+     * @return The wrapper associated with the Command's Entity
+     */
+    private AV3DEntityWrapper getParentWrapper(Command command, Entity entity) {
+
+        int parentID = -1;
+        AV3DEntityWrapper pw = null;
+
+        if (command instanceof AddEntityChildCommand) {
+
+            Entity parentEntity =
+                ((AddEntityChildCommand)command).getParentEntity();
+            parentID = parentEntity.getEntityID();
+
+        } else if (command instanceof AddEntityChildTransientCommand) {
+
+            Entity parentEntity =
+                ((AddEntityChildTransientCommand)command).getParentEntity();
+            parentID = parentEntity.getEntityID();
+
+        } else {
+
+            parentID = entity.getParentEntityID();
+        }
+
+        if (parentID != -1) {
+            pw = wrapperMap.get(parentID);
+        }
+
+        return(pw);
+    }
+
+    /**
+     * Aggregate the children of the specified entity
+     * into the argument list
+     *
+     * @param entity The Entity whose children to gather
+     * @param list The List to place them in
+     */
+    private void getChildren(Entity entity, List<Entity> list) {
+        if (entity.hasChildren()) {
+            ArrayList<Entity> children = entity.getChildren();
+            list.addAll(children);
+            for (int i = 0; i < children.size(); i++) {
+                Entity child = children.get(i);
+                getChildren(child, list);
+            }
+        }
+    }
+
+    /**
+     * Transform the bounds of the Entity hierarchy from the scenegraph's
+     * representation of the Entity's transform matrix.
+     *
+     * @param parent The Entity to start from
+     * @param exclude The Entity whose branch to exclude
+     */
+    private void configBoundsFromSceneGraph(Entity parent, Entity exclude) {
+        if (parent.hasChildren()) {
+            ArrayList<Entity> children = parent.getChildren();
+            for (int i = 0; i < children.size(); i++) {
+                Entity child = children.get(i);
+                if (child != exclude) {
+                    int id = child.getEntityID();
+                    AV3DEntityWrapper wrapper = wrapperMap.get(id);
+                    if (wrapper != null) {
+                        OrientedBoundingBox bounds = wrapper.getBounds();
+                        tu.getLocalToVworld(wrapper.transformGroup, mtx);
+                        bounds.transform(mtx);
+
+                        OrientedBoundingBox ex_bounds = wrapper.getExtendedBounds();
+                        if (ex_bounds != bounds) {
+                            ex_bounds.transform(mtx);
+                        }
+                    }
+                    configBoundsFromSceneGraph(child, exclude);
+                }
+            }
+        }
+    }
+
+    /**
+     * Transform the bounds of the Entity hierarchy using the specified
+     * matrix as the Entity transform matrix.
+     *
+     * @param parent The Entity to start from
+     * @param pmtx The transform matrix of the parent
+     */
+    private void configBoundsFromMatrix(Entity parent, Matrix4f pmtx) {
+        if (parent.hasChildren()) {
+            ArrayList<Entity> children = parent.getChildren();
+            for (int i = 0; i < children.size(); i++) {
+                Entity child = children.get(i);
+                int id = child.getEntityID();
+                AV3DEntityWrapper wrapper = wrapperMap.get(id);
+                if (wrapper != null) {
+                    OrientedBoundingBox bounds = wrapper.getBounds();
+                    Matrix4f cmtx = new Matrix4f(wrapper.groupMatrix);
+                    cmtx.mul(pmtx, cmtx);
+                    bounds.transform(cmtx);
+
+                    OrientedBoundingBox ex_bounds = wrapper.getExtendedBounds();
+                    if (ex_bounds != bounds) {
+                        ex_bounds.transform(mtx);
+                    }
+                    configBoundsFromMatrix(child, cmtx);
+                }
+            }
+        }
+    }
+
+    /**
+     * Return the property value
+     *
+     * @param entity The Entity to query for the property value
+     * @param propName The named property
+     * @return The value of the property, or false if it did not exist
+     * or was not a Boolean object.
+     */
+    private boolean getBoolean(Entity entity, String propName) {
+        boolean value = false;
+        Object obj = entity.getProperty(
+            Entity.DEFAULT_ENTITY_PROPERTIES,
+            propName);
+
+        if ((obj != null) && (obj instanceof Boolean)){
+            value = (Boolean)obj;
+        }
+        return(value);
+    }
+
+    /**
+     * Return the map of wrappers for collision testing
+     *
+     * @param useSurrogates Flag indicating that surrogate entities should be
+     * used when available.
+     * @return The map.
+     */
+    private HashMap<Integer, EntityWrapper> getWrapperMap(boolean useSurrogates) {
+        combinedWrapperMap.clear();
+        combinedWrapperMap.putAll(wrapperMap);
+        if (useSurrogates) {
+            combinedWrapperMap.putAll(surrogateMap);
+        }
+        return(combinedWrapperMap);
+    }
+
+    /**
+     * Return a short String identifier of the argument Entity
+     *
+     * @param entity The entity
+     * @return The identifier
+     */
+    private String getIdentifier(Entity entity) {
+        return("[id="+ entity.getEntityID() + ", name=\""+ entity.getName() +"\"]");
+    }
+}

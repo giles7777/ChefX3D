@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<ChefX3D>
+	<EntityParams>
+		<Sheet name='ToolParams'>
+	   		<EntityDefinition>
+	   			<Tool name="" toolType="1" classificationLevel="0" 
+	   					constraint="NO_REQUIREMENT" fixedSize="false" 
+	   					helper="false" controller="false" category="" 
+	   					updateChildren="false">	   					
+	   				<Description>Blah</Description>
+	   				<Size sheet="" xExpr="" yExpr="" zExpr="" />  
+	   				<Position x="" y="" z="" />
+	   				<Rotation x="" y="" z="" angle="" />	   				 				
+	   				<Icons topDownUrl="" fixedAspect="false" />
+	   				<OutputMapping x3dUrl="" />
+	   				<Children />
+	   				<Associates />
+	   				<ParentAssociates />
+	   				<Parameters />
+	   				<MultiSegment line="false" length="-1">
+	   					<Segments>
+		   					<!-- <Segment id="0" endId="1" startId="0" /> -->
+		   				</Segments>
+		   				<Vertices>
+		   					<!--
+		   					<Vertex id="0" x="0" y="0" z="0" />
+		   					<Vertex id="1" x="1" y="1" z="1" />
+		   					-->
+		   				</Vertices>
+	   				</MultiSegment>   				
+	   			</Tool>
+			</EntityDefinition>
+     	</Sheet>
+  	</EntityParams>  
+</ChefX3D>

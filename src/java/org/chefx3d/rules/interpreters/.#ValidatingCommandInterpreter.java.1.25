@@ -1,0 +1,422 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.interpreters;
+
+//External Imports
+import java.util.ArrayList;
+
+//Internal Imports
+import org.chefx3d.model.*;
+import org.chefx3d.rules.definitions.GenerateSurrogate;
+import org.chefx3d.rules.definitions.Rule;
+import org.chefx3d.rules.engines.RuleEngine;
+import org.chefx3d.util.CheckStatusReportElevation;
+import org.chefx3d.util.ErrorReporter;
+import org.chefx3d.view.awt.av3d.AV3DView;
+import org.chefx3d.view.awt.av3d.DefaultSurrogateEntityWrapper;
+import org.chefx3d.view.awt.av3d.RuleCollisionChecker;
+import org.chefx3d.view.awt.av3d.StatusReporter;
+
+/**
+ * Implementation of CommandValidator. Has a list of commands to
+ * look for and will search the list for a matching command. If found, the
+ * assigned RuleEngine is extracted and used to process the command.
+ *
+ * @author Ben Yarger
+ * @version $Revision: 1.25 $
+ */
+public class ValidatingCommandInterpreter implements CommandValidator {
+
+    /** RuleEngine reference */
+    private RuleEngine ruleEngine;
+
+    /** CommandDataCenter reference for looking up Command/RuleEngine matches */
+    private CommandDataCenter commandDataCenter;
+
+    /** Access to selection object status color */
+    private StatusReporter statusReporter;
+
+    /** Manages the status levels to report back as color to the selection box */
+    private CheckStatusReportElevation statusManager;
+
+    /** Contains all commands issued by rule engines for the current command */
+    private ArrayList<Command> validationNewlyIssuedCommands;
+
+    /** Reference to the collision checker used by the AV3D view */
+    protected RuleCollisionChecker collisionChecker;
+
+    /**
+     * Default constructor
+     */
+    public ValidatingCommandInterpreter(ErrorReporter errorReporter, AV3DView view) {
+
+        commandDataCenter = new CommandDataCenter(
+                errorReporter,
+                view.getRuleCollisionChecker(),
+                view);
+
+        collisionChecker = view.getRuleCollisionChecker();
+        statusReporter = view.getStatusReporter();
+        statusManager = new CheckStatusReportElevation();
+        validationNewlyIssuedCommands = new ArrayList<Command>();
+    }
+
+    /**
+     * Return whether this command passes the validation process.
+     *
+     * @param command The command to check.
+     */
+    public boolean validate(Command command) {
+
+        // Always clear out the surrogates first thing
+        collisionChecker.clearSurrogates();
+
+        /*
+         * If the command implements RuleBypassFlag and the flag is true
+         * immediately return true and allow the rule to execute.
+         */
+        if(command instanceof RuleBypassFlag){
+
+            if(((RuleBypassFlag)command).bypassRules()){
+                return true;
+            }
+        }
+
+        /*
+         * Proceed with rule execution.
+         */
+        ArrayList<Command> commandList;
+
+        if(command instanceof MultiCommand){
+
+            commandList = ((MultiCommand)command).getCommandList();
+
+        } else if (command instanceof MultiTransientCommand) {
+
+            commandList = ((MultiTransientCommand)command).getCommandList();
+
+        } else if(command instanceof MultiRevertCommand){
+
+            commandList = ((MultiRevertCommand)command).getCommandList();
+
+
+        }else {
+
+            commandList = new ArrayList<Command>();
+            commandList.add(command);
+        }
+
+        statusManager.resetElevationLevel();
+        clearValidationNewlyIssuedCommands();
+        WorldModel model = null;
+
+        // Process commands against rules
+        for(Command cmd: commandList){
+
+            if(model == null && cmd instanceof RuleDataAccessor){
+
+                model = ((RuleDataAccessor)cmd).getWorldModel();
+            }
+
+            ruleEngine = commandDataCenter.matchCommand(cmd);
+
+            if(ruleEngine != null){
+                /*
+                 *  If process rules returns false (command failed rule
+                 *  check), then return false;
+                 */
+                if(!ruleEngine.processRules(cmd, statusManager)){
+
+                    statusReporter.setSelectionStatus(
+                            statusManager.getStatusColor());
+
+                    return resetToStart(command);
+                } else {
+                    addCommandsToValidationNewlyIssuedList(Rule.getNewlyIssuedCommands());
+                }
+            }
+        }
+
+        // Jon Hubba wrote this.
+        //
+        for(Command currentCmd : this.validationNewlyIssuedCommands) {
+            if(currentCmd instanceof RemoveEntityChildCommand) {
+
+                ArrayList<Command> newCommandList =
+                    Rule.getNewlyIssuedCommands();
+
+                Object[] newCommands = newCommandList.toArray();
+
+                for(int i = 0; i < newCommands.length; i++) {
+                    if(((RuleDataAccessor)currentCmd).
+                            isEqualTo((Command)newCommands[i])) {
+                        newCommandList.remove(newCommands[i]);
+                    }
+                }
+            }
+        }
+
+
+        /*
+        //
+        // EMF: get the newly issued commands
+        // and run them through the rules engine!
+        //
+        ArrayList<Command> newlyIssuedCommands = new ArrayList<Command>();
+        newlyIssuedCommands.addAll(getNewlyIssuedCommands());
+
+        for(Command newCmd: newlyIssuedCommands){
+
+            if(model == null && newCmd instanceof RuleDataAccessor){
+                model = ((RuleDataAccessor)newCmd).getWorldModel();
+            }
+
+            ruleEngine = commandDataCenter.matchCommand(newCmd);
+
+            // if rule evaluation should not occur, then skip over this command
+            if(ruleEngine == null || !(newCmd instanceof RuleBypassFlag) ||
+                    ((RuleBypassFlag)command).bypassRules())
+                continue;
+
+            //
+            // run the command through the rules engine.  Fail the entire
+            // sequence if this newlyIssuedCommand fails its rule check.
+            //
+            if( !ruleEngine.processRules(newCmd, statusManager)){
+                //
+                //  If process rules returns false (command
+                //  failed rule check), then return false
+                //
+                statusReporter.setSelectionStatus(
+                    statusManager.getStatusColor());
+
+                return resetToStart(command);
+            }
+        }*/
+        //
+        // EMF: end rules-engining for newly issued commands
+
+
+
+
+
+        statusReporter.setSelectionStatus(
+                statusManager.getStatusColor());
+
+        if(hasValidationNewlyIssuedCommands()){
+
+            ArrayList<Command> cmdList = new ArrayList<Command>();
+            cmdList.add(command);
+            cmdList.addAll(getValidationNewlyIssuedCommands());
+
+            MultiCommand cmd = new MultiCommand(
+                    cmdList,
+                    "MultiCommand of rule engine added commands plus original",
+                    true,
+                    true);
+
+            model.applyCommand(cmd);
+
+            return false;
+
+        }
+
+        return true;
+    }
+
+    /**
+     * Reset all commands back to their last known good values.
+     *
+     * @param command Command to reset
+     * @return true if was reset, false if it should just be canceled
+     */
+    protected boolean resetToStart(Command command) {
+
+
+        if(command instanceof RuleDataAccessor){
+
+            if(((RuleDataAccessor)command).shouldCommandDie()){
+                return false;
+            }
+        }
+
+        /*
+         * Proceed with rule execution.
+         *
+         * Add commands are outright rejected. All other cases are handled
+         * accordingly.
+         */
+        ArrayList<Command> commandList;
+
+        if(command instanceof MultiCommand){
+
+            commandList = ((MultiCommand)command).getCommandList();
+
+        } else if (command instanceof MultiTransientCommand) {
+
+            commandList = ((MultiTransientCommand)command).getCommandList();
+
+        } else if(command instanceof MultiRevertCommand){
+
+            commandList = ((MultiRevertCommand)command).getCommandList();
+
+        } else {
+
+            commandList = new ArrayList<Command>();
+            commandList.add(command);
+        }
+
+
+        for(int i = 0;i < commandList.size();i++) {
+
+            if(commandList.get(i) instanceof AddEntityCommand ||
+                    commandList.get(i) instanceof AddEntityChildCommand ||
+                    commandList.get(i) instanceof AddEntityChildTransientCommand ||
+                    commandList.get(i) instanceof AddSegmentCommand ||
+                    commandList.get(i) instanceof AddSegmentTransientCommand ||
+                    commandList.get(i) instanceof AddVertexCommand ||
+                    commandList.get(i) instanceof AddVertexTransientCommand ||
+                    commandList.get(i) instanceof RemoveEntityChildCommand ||
+                    commandList.get(i) instanceof RemoveEntityCommand) {
+
+                return false;
+
+            } else if(commandList.get(i) instanceof MultiCommand){
+               ((MultiCommand)command).resetToStart();
+
+                return true;
+
+            } else if (commandList.get(i) instanceof MultiTransientCommand) {
+
+                return true;
+
+            } else if(commandList.get(i) instanceof MultiRevertCommand){
+
+               ((MultiRevertCommand)command).resetToStart();
+
+            } else {
+
+                if(commandList.get(i) instanceof RuleDataAccessor)
+                    ((RuleDataAccessor)commandList.get(i)).resetToStart();
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Clear the newly issued commands list
+     */
+    protected void clearValidationNewlyIssuedCommands(){
+
+        validationNewlyIssuedCommands.clear();
+    }
+
+    /**
+     * Add new commands to the command list
+     * @param cmdList ArrayList of commands
+     */
+    protected void addCommandsToValidationNewlyIssuedList(ArrayList<Command> cmdList){
+
+        // We need to avoid adding duplicate commands.
+        // Extract each command and check for a matching transaction ID
+        // already in the newlyIssueCommands list.
+        ArrayList<Command> subList = new ArrayList<Command>();
+
+        for (int i = 0; i < cmdList.size(); i++) {
+
+            if(cmdList.get(i) instanceof MultiCommand){
+
+                subList = ((MultiCommand)cmdList.get(i)).getCommandList();
+
+            } else if (cmdList.get(i) instanceof MultiTransientCommand) {
+
+                subList = ((MultiTransientCommand)cmdList.get(i)).getCommandList();
+
+            } else if(cmdList.get(i) instanceof MultiRevertCommand){
+
+                subList = ((MultiRevertCommand)cmdList.get(i)).getCommandList();
+
+
+            } else {
+
+                subList.add(cmdList.get(i));
+            }
+        }
+
+        // Do the actual compare operation.
+        // If the newlyIssuedCommands list already contains this command
+        // don't add it.
+        for (int i = 0; i < subList.size(); i++) {
+
+            if (validationNewlyIssuedCommands.contains(subList.get(i))) {
+                continue;
+            }
+
+            validationNewlyIssuedCommands.add(subList.get(i));
+        }
+    }
+
+    /**
+     * Get newly issued commands
+     * @return ArrayList<Command> new commands
+     */
+    protected ArrayList<Command> getValidationNewlyIssuedCommands(){
+
+        return validationNewlyIssuedCommands;
+    }
+
+    /**
+     * Check if new commands exist
+     * @return True if new commands exist, false otherwise
+     */
+    protected boolean hasValidationNewlyIssuedCommands(){
+
+        if(validationNewlyIssuedCommands.size() > 0){
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
+     * Add the command's entity as a surrogate to the collision checker.
+     *
+     * @param command Command to process and turn into a surrogate
+     */
+    protected void addSurrogate(Command command) {
+
+
+        DefaultSurrogateEntityWrapper surrogate =
+            GenerateSurrogate.getInstance().createSurrogate(command);
+
+        if (surrogate != null) {
+            collisionChecker.addSurrogate(surrogate);
+        }
+    }
+
+    /**
+     * Remove the entity surrogate.
+     *
+     * @param entity Entity to have it surrogate removed
+     */
+    protected void removeSurrogate(PositionableEntity entity) {
+
+        DefaultSurrogateEntityWrapper surrogate =
+            GenerateSurrogate.getInstance().createEmptySurrogate(entity);
+
+        if (surrogate != null) {
+            collisionChecker.removeSurrogate(surrogate);
+        }
+    }
+}

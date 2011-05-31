@@ -1,0 +1,7 @@
+Extension-Name: chefx3d
+Specification-Vendor: Web3d Consortium
+Specification-Version: 3.0
+Implementation-Vendor-Id: com.yumetech
+Implementation-Vendor: Yumetech, Inc
+Implementation-Version: 3.0
+Implementation-Title: ChefX3D Tools

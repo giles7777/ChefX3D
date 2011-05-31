@@ -1,0 +1,36 @@
+			      Web3D Consortium
+                           Xj3D Licensing information
+
+This codebase contains a lot of code, licensed under a number of different
+licenses, dependent on the intended use. The text for each license may be
+found in the same directory as this file is located.
+
+Each directory is given relative to the root of the tree as checked out
+from CVS.
+
+GNU GPL (GPL.txt):
+  All code under the /apps directory
+
+GNU LGPL (LGPL.txt):
+  All code under the /src directory
+  All code under the /make directory
+  All code under the /test directory
+  Pre-compiled libraries contained under /lib directory unless specified
+  The code in /parsetest/sai/external and parsetest/eai
+  ExplicitLayout Magager from Zookitec (http://www.zookitec.com/explicitlayout.html)
+    /lib/elall.jar
+
+BSD (BSD.txt):
+  All code under /examples
+  All code under /bin
+  All other code in /parsetest except where noted above.
+
+APACHE (APACHE.txt)
+  Common Swing Components from L2FProd.com (https://l2fprod-common.dev.java.net/)
+    /lib/l2fprod-common-outlookbar.jar
+
+Documents under /docs are not currently assigned a license, thus
+redistributable under standard copyright terms.
+
+Files in /contrib each have their own license. Please consult the source
+to find out in each specific case.

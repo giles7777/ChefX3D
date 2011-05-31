@@ -1,0 +1,140 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+import javax.vecmath.Vector3f;
+
+//Internal Imports
+import org.chefx3d.model.BasePositionableEntity;
+import org.chefx3d.model.Command;
+import org.chefx3d.model.Entity;
+import org.chefx3d.model.MoveEntityCommand;
+import org.chefx3d.model.MoveEntityTransientCommand;
+import org.chefx3d.model.TransitionEntityChildCommand;
+import org.chefx3d.model.WorldModel;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+
+/**
+ * Defines the Movement Restricted To Parent check. If the movement is restricted
+ * to a specific parent, and the new parent is not in the parents specified by
+ * the entity, then movement is not allowed.
+ *
+ * @author Alan Hudson
+ * @version $Revision: 1.6 $
+ */
+public class MovementPermanentParentRule extends Rule {
+
+    /** Static class instance */
+    private static MovementPermanentParentRule rule =
+        new MovementPermanentParentRule();
+
+    private static final String ILLEGAL_REPARENT_PROP =
+        "org.chefx3d.rules.definitions.MovementPermanentParentRule.illegalReParent";
+
+
+    /**
+     * Private constructor. All Rule classes should be implemented this way.
+     */
+    private MovementPermanentParentRule(){
+
+        ruleType = RULE_TYPE.INVIOLABLE;
+    }
+
+    /**
+     * Return class instance.
+     * @return MovementPermanentParentRule instance
+     */
+    public static MovementPermanentParentRule getInstance(){
+        return rule;
+    }
+
+    /**
+     * Determine if the movement Command should be allowed.
+     * Constrain movement based on parameters set for Entity. If the
+     * movement is not allowed resulting in the original position to still
+     * be valid, return false, otherwise always returns true.
+     *
+     * @param entity Entity object
+     * @param model WorldModel object
+     * @param command Command object
+     * @return boolean false if there is no change in position, true otherwise
+     */
+    @Override
+    protected boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command) {
+
+        Boolean permanent_parent = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.USES_PERMANENT_PARENT);
+
+        if (permanent_parent == null || permanent_parent.booleanValue() == false) {
+            return true;
+        }
+
+        Boolean parent_set = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.PERMANENT_PARENT_SET);
+
+
+        if (parent_set == null || parent_set.booleanValue() == false) {
+            return true;
+        }
+
+        Boolean is_shadow =
+            (Boolean) entity.getProperty(
+                    entity.getParamSheetName(),
+                    Entity.SHADOW_ENTITY_FLAG);
+
+        if (is_shadow != null && is_shadow)
+            return true;
+
+        if(command instanceof MoveEntityCommand) {
+            return true;
+        } else if (command instanceof TransitionEntityChildCommand){
+            TransitionEntityChildCommand cmd = (TransitionEntityChildCommand) command;
+            Entity start = cmd.getStartParentEntity();
+            Entity end = cmd.getEndParentEntity();
+
+            // TODO: Need to allow to zone?
+
+            if (command.isTransient()) {
+                if (start == end)
+                    return true;
+                else {
+                    return false;
+                }
+
+
+            }
+
+            if (start != end) {
+                String illegalCol = intl_mgr.getString(ILLEGAL_REPARENT_PROP);
+                popUpMessage.showMessage(illegalCol);
+
+                cmd.resetToStart();
+                return true;
+            } else {
+                return true;
+            }
+        } else {
+            // MoveEntityTransientCommand case.  Ignore
+            return true;
+        }
+    }
+}

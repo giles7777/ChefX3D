@@ -1,0 +1,98 @@
+#*********************************************************************
+#
+#                         (C) 2009 Yumetech, Inc
+#                            http://www.yumetech.com
+#
+# Package makefile for the org.chefx3d.cache directory
+#
+# Author: Daniel Joyce
+# Version: $Revision: 1.43 $
+#
+#*********************************************************************
+
+PACKAGE = org.chefx3d.rules.definitions
+
+# The source files to compile. These are declared in order that they must be
+# compiled in
+SOURCE = \
+    Rule.java \
+    SetRelativePositionRule.java \
+    OverhangLimitRule.java \
+    AddPermanentParentRule.java \
+    AutoAddRule.java \
+    AddAbsoluteSnapCheckRule.java \
+    AddAutoAddRule.java \
+    AddEntityCheckForCollisionsRule.java \
+    AddIncrementalSnapCheckRule.java \
+    AddRestrictedParentRule.java \
+    AutoSpanRule.java \
+    ChildrenCollisionCheckRule.java \
+    CanDeleteRule.java \
+    CanRotateAlongAxisRule.java \
+    CanRotateRule.java \
+    CanScaleRule.java \
+    CheckAutoSpanNeighborsRule.java \
+    SelectedEntityAnchorVisibilityRules.java \
+    DeleteKitRule.java \
+    DeleteTemplateRule.java \
+    DeleteAutoAddRule.java \
+    DeleteCollisionsRule.java \
+    FlagAutoAddProductRule.java \
+    FreeFloatingChildRule.java \
+    GlobalDepthOffsetRule.java \
+    HeightPositionLimitRule.java \
+    InitialPositionCorrectionRule.java \
+    InitialAddPositionCorrectionRule.java \
+    InitialMovePositionCorrectionRule.java \
+    InitialAddTemplateCorrectionRule.java \
+    InstallPositionRequirementRule.java \
+    InstallPositionMultiZoneRequirementRule.java \
+    IsEditableRule.java \
+    MoveAutoAddRule.java \
+    MoveAutoAddedEntityConstraintRule.java \
+    MovementCheckForObjectCollisionsRule.java \
+    MovementHasObjectCollisionsRule.java \
+    MovementNoCollisionRule.java \
+    MovementRestrictedToPlaneRule.java \
+    MovementRestrictedParentRule.java \
+    MovementPermanentParentRule.java \
+    MovementUsesAbsoluteSnapsRule.java \
+    MovementUsesIncrementalSnapsRule.java \
+    MovementUsesIncrementalSpecialCaseSnapsRule.java \
+    MovementUsesSnapsRule.java \
+    MoveStandardScaleChildRule.java \
+    MultipleParentCorrectionRule.java \
+    ParentBorderBoundsCheck.java \
+    PositiveScaleOnlyRule.java \
+    ProximityPositionSnapRule.java \
+    ReplaceEntityRule.java \
+    RotationHasObjectCollisionsRule.java \
+    ScaleAutoAddRule.java \
+    ScaleBoundsCheckRule.java \
+    ScaleHasObjectCollisionsRule.java \
+    ScaleRestrictedToAxisOrPlaneRule.java \
+    ScaleRule.java \
+    ScaleUsesAbsoluteSnapsRule.java \
+    ScaleUsesIncrementalSnapsRule.java \
+    ScaleUsesSnapsRule.java \
+    ScaleChangeModelRule.java \
+    SegmentBoundsCheckRule.java \
+    SegmentEdgeEntityOrientationRule.java \
+    SegmentEdgeSnapRule.java \
+    SingleSelectionRule.java \
+    SnapToRotationIncrementRule.java \
+    SnapToRotationValueRule.java \
+    StackRule.java \
+    VertexHeightPropertyChangeRule.java \
+    UpdateSegmentChildrenRelativePositionRule.java \
+    
+    
+# The list of other files we need to copy from this directory to the classes
+# directory when we are making JAR files.
+EXTRA =
+
+# If the package requires extra classes outside the JDK, the JAR files that
+# are required are listed here. These should be found in ${PROJECT_ROOT}/lib
+JARS_3RDPARTY = vecmath.jar j3d-org-all_0.9.0.jar
+
+include ${PROJECT_ROOT}/make/Makefile.jav

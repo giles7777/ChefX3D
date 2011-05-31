@@ -1,0 +1,129 @@
+#X3D V3.0 utf8
+
+PROFILE Immersive
+
+EXTERNPROTO GeometryHolder [
+   inputOutput SFString name
+   inputOutput SFInt32 geometryType
+   inputOutput MFVec3f coord
+   inputOutput MFVec2f texCoord
+   inputOutput MFVec3f normal
+   inputOutput MFInt32 index
+   inputOutput SFNode appearance
+] [
+   "FencePrototype.x3dv#GeometryHolder"
+  ]
+
+EXTERNPROTO Fence [
+   initializeOnly SFInt32 fencesPerShape      # Must evenly divide into the number right now
+   initializeOnly MFVec3f start
+   initializeOnly MFVec3f end
+   initializeOnly MFFloat panelHeight
+   initializeOnly MFFloat panelTopHeight
+   initializeOnly MFBool panelSpan
+   initializeOnly MFInt32 postType                 # Index into postGeometry
+   initializeOnly MFInt32 postTopType              # Index into postGeometry
+   initializeOnly MFVec3f postSize
+   initializeOnly MFVec3f postTopSize
+   initializeOnly MFBool postBraced   
+   initializeOnly MFNode postGeometry         # 1,1,1 sized geometry for a post
+   initializeOnly MFNode postTopGeometry      # 1,1,1 sized geometry for a post Top
+   initializeOnly SFInt32 panelAppearance     # What appearance should all the panels have
+   initializeOnly SFInt32 panelTopAppearance  # What appearance should all the panel Tops have
+   initializeOnly SFInt32 panelRailAppearance  # What appearance should all the rails have
+   initializeOnly SFInt32 postAppearance       # What appearance should all the posts have
+   initializeOnly SFInt32 postTopAppearance    # What appearance should all the post Tops have
+   initializeOnly MFNode appearance           # Array of appearances to reuse
+
+   # Unsupported currently   
+   initializeOnly MFInt32 panelRailType 
+   initializeOnly MFFloat panelRailHeight
+   initializeOnly MFInt32 panelRailCount
+   initializeOnly MFFloat panelOverhang
+   initializeOnly MFFloat panelRaisedHeight
+   initializeOnly SFBool stepped
+   
+] [
+   "FencePrototype.x3dv#Fence"
+  ]
+
+Viewpoint {
+   position 0 0 20
+}
+
+Background { skyColor [0.5 0.5 0.5] }
+
+Fence {  
+   fencesPerShape 2
+   panelHeight [6.0 6.0]
+   panelTopHeight [0.3 0.3]
+   
+   start [0 0 0, 8 2 4]
+   end   [8 2 4, 16 0 0]
+   
+   postType [0 0 0]
+   postSize [
+      0.075 6 0.075
+      0.075 6 0.075
+      0.075 6 0.075
+   ]
+   
+   postTopType [0 0 0]   
+   postTopSize [
+      0.05 1 0.05
+      0.05 1 0.05
+      0.05 1 0.05
+   ]
+   
+   panelAppearance 0
+   panelTopAppearance 4
+   panelRailAppearance 3
+   postAppearance 2
+   appearance [
+      Appearance {
+         texture ImageTexture {
+            url ["Textures/fence01.png"]
+         }
+      }
+      
+      Appearance {
+         material Material {
+            diffuseColor 0.5 0.5 0.5
+            shininess 0.7
+         }
+      }
+      
+      Appearance {
+         material Material {
+            diffuseColor 0 0 0
+            shininess 0.7
+         }
+      }
+      Appearance {
+         material Material {
+            diffuseColor 1 1 1
+         }
+      }
+      
+      Appearance {
+         texture ImageTexture {
+            url ["Textures/barbwire1.png"]
+         }
+      }
+      
+   ]
+
+   postGeometry [
+      DEF BOX_GEOM GeometryHolder {
+         name "Box"
+     coord [0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, -0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, 0.5, -0.5, -0.5, -0.5, 0.5, -0.5, -0.5, 0.5, -0.5, 0.5, -0.5, -0.5, 0.5]
+     texCoord [1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0]
+     normal [0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, 1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0, 0.0, -1.0, 0.0]
+     index [0, 1, 2, 2, 3, 0, 4, 5, 6, 6, 7, 4, 8, 9, 10, 10, 11, 8, 12, 13, 14, 14, 15, 12, 16, 17, 18, 18, 19, 16, 20, 21, 22, 22, 23, 20]
+     }
+   ]
+   
+   postTopGeometry [
+      USE BOX_GEOM
+   ]
+}

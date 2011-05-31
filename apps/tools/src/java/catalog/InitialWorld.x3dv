@@ -1,0 +1,9 @@
+#X3D V3.2 utf8
+
+PROFILE Immersive
+COMPONENT Navigation:3
+COMPONENT PickingSensor:2
+
+#/*
+  Defines the maxium spec, profile, component levels are in this catalog.
+*/#

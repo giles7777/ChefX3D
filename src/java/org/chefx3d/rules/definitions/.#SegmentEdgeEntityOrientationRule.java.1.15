@@ -1,0 +1,857 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+import java.util.ArrayList;
+import java.util.List;
+
+import javax.vecmath.Vector3d;
+
+//Internal Imports
+import org.chefx3d.model.*;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.tool.EntityBuilder;
+import org.chefx3d.tool.SimpleTool;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+
+/**
+ * Adjusts the orientation of entities 90 degrees clockwise or counter
+ * clockwise depending on which edge of the wall they are on. Designed
+ * specifically for segment zones and switching at the left and right
+ * extends of the active zone.
+ *
+ * @author Ben Yarger
+ * @version $Revision: 1.15 $
+ */
+public class SegmentEdgeEntityOrientationRule extends Rule {
+
+    /** Status message for pop up message */
+    private static final String POP_UP_MSG =
+        "org.chefx3d.rules.definitions.SegmentEdgeEntityOrientationRule.illegalCollision";
+
+    /** Static class instance */
+    private static SegmentEdgeEntityOrientationRule rule =
+        new SegmentEdgeEntityOrientationRule();
+
+    /** Private constructor. All Rule classes should be implemented this way. */
+    private SegmentEdgeEntityOrientationRule(){
+
+        ruleType = RULE_TYPE.STANDARD;
+    }
+
+    /**
+     * Return class instance
+     * @return SnapToRotationIcrementRule
+     */
+    public static SegmentEdgeEntityOrientationRule getInstance(){
+        return rule;
+    }
+
+    @Override
+    protected boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command) {
+
+        // If we don't have a positionable entity, don't bother processing
+        if(!(entity instanceof PositionableEntity)){
+
+            return true;
+        }
+
+        // Check for flag and attempt to exit as early as possible. Only
+        // evaluate if true.
+        Boolean hasOrientationRequirement = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.HAS_ORIENTATION_REQUIREMENTS);
+
+        if(hasOrientationRequirement == null ||
+                hasOrientationRequirement == false){
+
+            return true;
+        }
+
+System.out.println("hasOrienRequirement");
+        // Get the current orientation
+        ChefX3DRuleProperties.ORIENTATION_STATE setOrientation =
+            (ChefX3DRuleProperties.ORIENTATION_STATE)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity, ChefX3DRuleProperties.CURRENT_ORIENTATION);
+
+        // Get the transient orientation
+        ChefX3DRuleProperties.ORIENTATION_STATE liveStateOrientation =
+            (ChefX3DRuleProperties.ORIENTATION_STATE)
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.LIVE_STATE_ORIENTATION);
+
+        if(liveStateOrientation == null){
+            liveStateOrientation = setOrientation;
+        }
+
+        // Check what the orientation should be at this position
+        ChefX3DRuleProperties.ORIENTATION_STATE instanceOrientation =
+            calculateOrientation(model, (PositionableEntity)entity, command);
+
+        //----------------------------------------------------------------
+        // Process data and issue swap if necessary
+        //----------------------------------------------------------------
+        if(command instanceof MoveEntityCommand){
+
+            int parentEntityID = entity.getParentEntityID();
+            Entity parentEntity = model.getEntity(parentEntityID);
+
+System.out.println("MoveEntity: " + parentEntityID);
+
+            boolean result = moveCommandResponse(
+                    setOrientation,
+                    liveStateOrientation,
+                    instanceOrientation,
+                    model,
+                    command,
+                    (PositionableEntity)entity,
+                    parentEntity);
+
+System.out.println("result: " + result);
+
+            if(result == false){
+
+                String msg = intl_mgr.getString(POP_UP_MSG);
+
+                popUpMessage.showMessage(msg);
+
+                return false;
+            }
+
+        } else if (command instanceof MoveEntityTransientCommand){
+
+            moveTransientCommandResponse(
+                    setOrientation,
+                    liveStateOrientation,
+                    instanceOrientation,
+                    model,
+                    (PositionableEntity)entity);
+
+        } else if (command instanceof TransitionEntityChildCommand){
+
+            Entity parentEntity =
+                ((TransitionEntityChildCommand)command).getEndParentEntity();
+
+            boolean result = transitionCommandResponse(
+                    setOrientation,
+                    liveStateOrientation,
+                    instanceOrientation,
+                    model,
+                    command,
+                    (PositionableEntity)entity,
+                    parentEntity,
+                    command.isTransient());
+
+            if(result == false){
+
+                String msg = intl_mgr.getString(POP_UP_MSG);
+
+                popUpMessage.showMessage(msg);
+
+                return false;
+            }
+
+        } else if (command instanceof AddEntityCommand){
+
+            int parentEntityID = entity.getParentEntityID();
+            Entity parentEntity = model.getEntity(parentEntityID);
+
+            boolean result = addCommandResponse(
+                    setOrientation,
+                    liveStateOrientation,
+                    instanceOrientation,
+                    model,
+                    command,
+                    (PositionableEntity)entity,
+                    parentEntity);
+
+            if(result == false){
+
+                String msg = intl_mgr.getString(POP_UP_MSG);
+
+                popUpMessage.showMessage(msg);
+
+                return false;
+            }
+
+        } else if (command instanceof AddEntityChildCommand){
+
+            Entity parentEntity =
+                ((AddEntityChildCommand)command).getParentEntity();
+
+            boolean result = addCommandResponse(
+                    setOrientation,
+                    liveStateOrientation,
+                    instanceOrientation,
+                    model,
+                    command,
+                    (PositionableEntity)entity,
+                    parentEntity);
+
+            if(result == false){
+
+                String msg = intl_mgr.getString(POP_UP_MSG);
+
+                popUpMessage.showMessage(msg);
+
+                return false;
+            }
+
+        } else if (command instanceof AddEntityChildTransientCommand){
+
+            Entity parentEntity =
+                ((AddEntityChildTransientCommand)command).getParentEntity();
+
+            boolean result = addCommandResponse(
+                    setOrientation,
+                    liveStateOrientation,
+                    instanceOrientation,
+                    model,
+                    command,
+                    (PositionableEntity)entity,
+                    parentEntity);
+
+            if(result == false){
+
+                String msg = intl_mgr.getString(POP_UP_MSG);
+
+                popUpMessage.showMessage(msg);
+
+                return false;
+            }
+        }
+
+        if (((RuleDataAccessor)command).shouldCommandDie()) {
+            return false;
+        }
+        return true;
+
+    }
+
+    /**
+     * Determine the swap that should occur either left, right or null if
+     * no swap change should occur.
+     *
+     * @param model WorldModel to reference
+     * @param entity Entity to examine
+     * @param command Command being checked by rule
+     * @return LEFT, RIGHT or null if no change should occur
+     */
+    private ChefX3DRuleProperties.ORIENTATION_STATE calculateOrientation(
+            WorldModel model,
+            PositionableEntity entity,
+            Command command){
+
+System.out.println("calcOrient: ");
+        Entity parentZoneEntity = null;
+
+        if(command instanceof AddEntityCommand){
+
+            int parentEntityID = entity.getParentEntityID();
+            Entity parentEntity = model.getEntity(parentEntityID);
+
+            if(parentEntity == null){
+
+                return null;
+
+            } else if (parentEntity.getType() == Entity.TYPE_SEGMENT){
+
+                parentZoneEntity = parentEntity;
+
+            } else {
+
+                parentZoneEntity = getParentZoneEntity(model, parentEntity);
+
+            }
+
+        } else if (command instanceof AddEntityChildCommand){
+
+            Entity parentEntity =
+                ((AddEntityChildCommand)command).getParentEntity();
+
+            entity.setParentEntityID(parentEntity.getEntityID());
+
+            if(parentEntity == null){
+
+                return null;
+
+            } else if (parentEntity.getType() == Entity.TYPE_SEGMENT){
+
+                parentZoneEntity = parentEntity;
+
+            } else {
+
+                parentZoneEntity = getParentZoneEntity(model, parentEntity);
+
+            }
+
+        } else if (command instanceof AddEntityChildTransientCommand){
+
+            Entity parentEntity =
+                ((AddEntityChildTransientCommand)command).getParentEntity();
+
+            if(parentEntity == null){
+
+                return null;
+
+            } else if (parentEntity.getType() == Entity.TYPE_SEGMENT){
+
+                parentZoneEntity = parentEntity;
+
+            } else {
+
+                parentZoneEntity = getParentZoneEntity(model, parentEntity);
+
+            }
+
+        } else {
+
+            parentZoneEntity = getParentZoneEntity(model, entity);
+
+        }
+
+        // Now that add special case is handled, get on with it
+        if (parentZoneEntity != null &&
+                parentZoneEntity.getType() == Entity.TYPE_SEGMENT){
+
+            SegmentEntity wallEntity = (SegmentEntity)parentZoneEntity;
+
+            // Get vectors and extract positions
+            VertexEntity startVertexEntity = wallEntity.getStartVertexEntity();
+            VertexEntity endVertexEntity = wallEntity.getEndVertexEntity();
+
+            double[] startVertexPos = new double[3];
+            double[] endVertexPos = new double[3];
+
+            startVertexEntity.getPosition(startVertexPos);
+            endVertexEntity.getPosition(endVertexPos);
+
+            Vector3d wallVec = new Vector3d(
+                    endVertexPos[0] - startVertexPos[0],
+                    endVertexPos[1] - startVertexPos[1],
+                    0.0);
+
+            double wallLength = wallVec.length();
+
+            // Determine if switch to left or right should occur.
+            // If at or beyond left edge, swaps left.
+            // If at or beyond right edge, swap right.
+            double[] pos = new double[3];
+            float[] bounds = new float[6];
+
+            double[] netPos = getRelativePosition(model, entity, wallEntity, false);
+
+            entity.getPosition(pos);
+            entity.getBounds(bounds);
+
+            double leftBounds = netPos[0] + bounds[0];
+            double rightBounds = netPos[0] + bounds[1];
+
+            if(leftBounds <= 0.0){
+
+                return ChefX3DRuleProperties.ORIENTATION_STATE.LEFT;
+
+            } else if (rightBounds + 0.001 >= wallLength){
+
+                return ChefX3DRuleProperties.ORIENTATION_STATE.RIGHT;
+            }
+
+        } else {
+
+            int b = 0;
+            b++;
+        }
+
+System.out.println("returning null");
+        // No change should occur, so return null
+        return null;
+    }
+
+    /**
+     * Issue add command for move command case. If the swap will cause
+     * collisions, then false will be returned indicating that the command
+     * should not execute and rule checking should cease.
+     *
+     * @param setOrientation Original orientation of entity
+     * @param liveStateOrientation Last known orientation
+     * @param instanceOrientation Current instance orientation
+     * @param model WorldModel to reference
+     * @param entity Entity to update
+     * @return True if successful, false otherwise
+     */
+    private boolean moveCommandResponse(
+            ChefX3DRuleProperties.ORIENTATION_STATE setOrientation,
+            ChefX3DRuleProperties.ORIENTATION_STATE liveStateOrientation,
+            ChefX3DRuleProperties.ORIENTATION_STATE instanceOrientation,
+            WorldModel model,
+            Command command,
+            PositionableEntity entity,
+            Entity parentEntity){
+
+        if(parentEntity == null){
+            return false;
+        }
+
+        // determine swap that should occur
+        ChefX3DRuleProperties.ORIENTATION_STATE resultOrientation = null;
+
+        if (instanceOrientation != null){
+
+            resultOrientation = instanceOrientation;
+
+        } else if (liveStateOrientation != null){
+
+            resultOrientation = liveStateOrientation;
+
+        } else {
+
+            // Case where no change has occurred, so don't issue swap
+            return true;
+        }
+
+        /*
+         * At this point, we know that whatever resultOrientation is set to is
+         * what the resulting swap should be. It will differ from the
+         * setOrientation and will thus be what we execute. We will only
+         * get to this point if this is the case.
+         */
+        setLiveStateOrientationProperty(
+                entity,
+                resultOrientation,
+                true);
+
+        if(!swapModel(
+                model,
+                command,
+                entity,
+                parentEntity,
+                resultOrientation)){
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Issue add command for transition command case. If the swap will cause
+     * collisions, then false will be returned indicating that the command
+     * should not execute and rule checking should cease.
+     *
+     * @param setOrientation Original orientation of entity
+     * @param liveStateOrientation Last known orientation
+     * @param instanceOrientation Current instance orientation
+     * @param model WorldModel to reference
+     * @param entity Entity to update
+     * @param isTransient Flag true if command is transient, false otherwise
+     * @return True if successful, false otherwise
+     */
+    private boolean transitionCommandResponse(
+            ChefX3DRuleProperties.ORIENTATION_STATE setOrientation,
+            ChefX3DRuleProperties.ORIENTATION_STATE liveStateOrientation,
+            ChefX3DRuleProperties.ORIENTATION_STATE instanceOrientation,
+            WorldModel model,
+            Command command,
+            PositionableEntity entity,
+            Entity parentEntity,
+            boolean isTransient){
+
+        if(parentEntity == null){
+            return false;
+        }
+
+        // determine swap that should occur
+        ChefX3DRuleProperties.ORIENTATION_STATE resultOrientation = null;
+
+        if(instanceOrientation != null){
+
+            resultOrientation = instanceOrientation;
+
+        } else if (liveStateOrientation != null){
+
+            resultOrientation = liveStateOrientation;
+
+        } else {
+
+            // Case where no change has occurred, so don't issue swap
+            return true;
+        }
+
+        /*
+         * At this point, we know that whatever resultOrientation is set to is
+         * what the resulting swap should be. It will differ from the
+         * setOrientation and will thus be what we execute. We will only
+         * get to this point if this is the case.
+         */
+        setLiveStateOrientationProperty(
+                entity,
+                resultOrientation,
+                true);
+
+        if(!isTransient){
+            if(!swapModel(
+                    model,
+                    command,
+                    entity,
+                    parentEntity,
+                    resultOrientation)){
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Issue add command for add command case. If the swap will cause
+     * collisions, then false will be returned indicating that the command
+     * should not execute and rule checking should cease.
+     *
+     * @param setOrientation Original orientation of entity
+     * @param liveStateOrientation Last known orientation
+     * @param instanceOrientation Current instance orientation
+     * @param model WorldModel to reference
+     * @param entity Entity to update
+     * @return True if successful, false otherwise
+     */
+    private boolean addCommandResponse(
+            ChefX3DRuleProperties.ORIENTATION_STATE setOrientation,
+            ChefX3DRuleProperties.ORIENTATION_STATE liveStateOrientation,
+            ChefX3DRuleProperties.ORIENTATION_STATE instanceOrientation,
+            WorldModel model,
+            Command command,
+            PositionableEntity entity,
+            Entity parentEntity){
+
+        if(parentEntity == null){
+            return false;
+        }
+
+        // determine swap that should occur
+        ChefX3DRuleProperties.ORIENTATION_STATE resultOrientation = null;
+
+        if (liveStateOrientation == instanceOrientation) {
+
+            // Case where no change has occurred, so don't issue swap
+            return true;
+
+        } else if (instanceOrientation != null){
+
+            resultOrientation = instanceOrientation;
+
+        } else if (liveStateOrientation != null){
+
+            resultOrientation = liveStateOrientation;
+
+        } else {
+
+            // Case where no change has occurred, so don't issue swap
+            return true;
+        }
+
+        /*
+         * At this point, we know that whatever resultOrientation is set to is
+         * what the resulting swap should be. It will differ from the
+         * setOrientation and will thus be what we execute. We will only
+         * get to this point if this is the case.
+         */
+        setLiveStateOrientationProperty(
+                entity,
+                resultOrientation,
+                true);
+
+        if(!swapModel(
+                model,
+                command,
+                entity,
+                parentEntity,
+                resultOrientation)){
+            return false;
+        }
+
+        return true;
+    }
+
+    /**
+     * Processes transient movement commands and generates the appropriate
+     * command to adjust the orientation if needed.
+     *
+     * @param setOrientation Originating orientation state
+     * @param liveStateOrientation Last known orientation
+     * @param instanceOrientation Orientation state at this instant
+     * @param model WorldModel to reference
+     * @param entity Entity affected by changes
+     */
+    private void moveTransientCommandResponse(
+            ChefX3DRuleProperties.ORIENTATION_STATE setOrientation,
+            ChefX3DRuleProperties.ORIENTATION_STATE liveStateOrientation,
+            ChefX3DRuleProperties.ORIENTATION_STATE instanceOrientation,
+            WorldModel model,
+            PositionableEntity entity){
+
+        // determine swap that should occur
+        ChefX3DRuleProperties.ORIENTATION_STATE resultOrientation = null;
+
+        if(instanceOrientation != null){
+
+            resultOrientation = instanceOrientation;
+
+        } else if (liveStateOrientation != null){
+
+            resultOrientation = liveStateOrientation;
+
+        } else {
+
+            // Case where no change has occurred, so don't issue swap
+            return;
+        }
+
+        /*
+         * At this point either we have a change to process or we don't.
+         * The original state isn't considered because either the transient
+         * orientation was set by a previous adjustment or it wasn't. If it
+         * wasn't and we have not instanceOrientation then no orientation
+         * change should occur and we catch that with the return above.
+         * If instanceOrientation is set and transientOrientation is not
+         * then we end up setting it below and issuing a swap.
+         * If transientOrientation is set and instanceOrientation is not
+         * processing below is skipped.
+         */
+
+        // Store orientation transient value
+        if(liveStateOrientation == null ||
+                liveStateOrientation != resultOrientation){
+
+            setLiveStateOrientationProperty(
+                    entity,
+                    resultOrientation,
+                    true);
+
+        }
+    }
+
+    /**
+     * Set the live state orientation rule property.
+     *
+     * @param entity Entity to update property value for
+     * @param state ChefX3DRuleProperties.ORIENTATION_STATE value
+     * @param ongoing Is change ongoing or not
+     */
+    private void setLiveStateOrientationProperty(
+            Entity entity,
+            ChefX3DRuleProperties.ORIENTATION_STATE state,
+            boolean ongoing){
+
+        entity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.LIVE_STATE_ORIENTATION,
+                state,
+                ongoing);
+    }
+
+    /**
+     * Swap the model for the one specified by toolID.
+     *
+     * @param model WorldModel to reference
+     * @param entity Entity to swap out
+     * @param parentEntity Parent to the entity
+     * @param toolID Tool id of tool to generate new swap entity with
+     * @return True if successful, false otherwise
+     */
+    private boolean swapModel(
+            WorldModel model,
+            Command command,
+            Entity entity,
+            Entity parentEntity,
+            ChefX3DRuleProperties.ORIENTATION_STATE changeToState) {
+
+        ArrayList<Command> newCmds = new ArrayList<Command>();
+
+        // Make sure we get the expected list of ids - should be length 2
+        String[] swapIDList = (String[])
+            RulePropertyAccessor.getRulePropertyValue(
+                    entity,
+                    ChefX3DRuleProperties.ORIENTATION_SWAP_ID_LIST);
+
+        if(swapIDList.length < 2){
+            return false;
+        }
+
+        // Extract the appropriate toolID based on value of changeToState
+        String toolID;
+
+        switch(changeToState){
+
+            case LEFT:
+                toolID = swapIDList[0];
+                break;
+
+            case RIGHT:
+                toolID = swapIDList[1];
+                break;
+
+            default:
+                return false;
+        }
+
+        // don't need to swap so return true
+        if (toolID.equals(entity.getToolID())) {
+            return true;
+        }
+
+        // Get the tool
+        SimpleTool tool =
+            (SimpleTool) catalogManager.findTool(toolID);
+
+        if(tool == null){
+            return false;
+        }
+
+        // Get the current position
+        if(!(entity instanceof PositionableEntity)){
+            return false;
+        }
+
+        double[] position = new double[3];
+
+        PositionableEntity posEntity = (PositionableEntity)entity;
+        posEntity.getPosition(position);
+
+        float[] bounds = new float[6];
+        posEntity.getBounds(bounds);
+
+        // issue remove cmd
+        RemoveEntityChildCommand removeCmd =
+            new RemoveEntityChildCommand(model, parentEntity, entity);
+
+        newCmds.add(removeCmd);
+
+//////////////////////////////////////////////////////////////////
+
+        //Same block of code is in ScaleChangeModelRule.java
+
+        // Create the new entity
+        EntityBuilder entityBuilder = view.getEntityBuilder();
+
+        Entity newEntity =
+            entityBuilder.createEntity(
+                    model,
+                    model.issueEntityID(),
+                    position,
+                    new float[] {0.0f, 1.0f, 0.0f, 0.0f},
+                    tool);
+
+        if (parentEntity instanceof ZoneEntity) {
+
+            // adjust the position by the change in bounds
+            PositionableEntity newPosEntity = (PositionableEntity)newEntity;
+            double[] newPos = new double[3];
+            newPosEntity.getPosition(newPos);
+
+            float[] newBounds = new float[6];
+            newPosEntity.getBounds(newBounds);
+
+            float[] oldSize = new float[] {
+                    Math.abs(bounds[0]) + bounds[1],
+                    Math.abs(bounds[2]) + bounds[3],
+                    Math.abs(bounds[4]) + bounds[5]};
+
+            float[] newSize = new float[] {
+                    Math.abs(newBounds[0]) + newBounds[1],
+                    Math.abs(newBounds[2]) + newBounds[3],
+                    Math.abs(newBounds[4]) + newBounds[5]};
+
+            float[] delta = new float[] {
+                newSize[0] - oldSize[0],
+                newSize[1] - oldSize[1],
+                newSize[2] - oldSize[2]};
+
+            switch(changeToState){
+
+                default:
+                case LEFT:
+                    newPos[0] += (delta[0] * 0.5);
+                    newPos[1] += (delta[1] * 0.5);
+                    newPos[2] += (delta[2] * 0.5);
+                    break;
+
+                case RIGHT:
+                    newPos[0] -= (delta[0] * 0.5);
+                    newPos[1] += (delta[1] * 0.5);
+                    newPos[2] += (delta[2] * 0.5);
+                    break;
+            }
+
+            newPosEntity.setPosition(newPos, false);
+
+        }
+
+        // make sure to correctly set the state
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.CURRENT_ORIENTATION,
+                changeToState,
+                false);
+
+        newEntity.setProperty(
+                Entity.DEFAULT_ENTITY_PROPERTIES,
+                ChefX3DRuleProperties.LIVE_STATE_ORIENTATION,
+                changeToState,
+                false);
+
+//////////////////////////////////////////////////////////////////
+        // create the add command
+        AddEntityChildCommand addCmd =
+            new AddEntityChildCommand(model, parentEntity, newEntity);
+
+        // Perform collision analysis on it before moving forward
+        performCollisionCheck(addCmd);
+
+        if(!performCollisionAnalysisHelper(
+                newEntity,
+                null,
+                false,
+                new int[] {entity.getEntityID()},
+                true)){
+
+            return false;
+        }
+
+        if(hasIllegalCollisionHelper(newEntity)){
+            return false;
+        }
+
+        newCmds.add(addCmd);
+
+        // Select the swap entity
+        SelectEntityCommand selCmd = new SelectEntityCommand(model, newEntity, true);
+
+        newCmds.add(selCmd);
+
+        // execute the command, these will get added to the
+        // next frame's processing
+        MultiCommand cmd = new MultiCommand(newCmds, addCmd.getDescription());
+        model.applyCommand(cmd);
+
+        ((RuleDataAccessor)command).setCommandShouldDie(true);
+
+        return true;
+
+    }
+}

@@ -1,0 +1,851 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2006 - 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU LGPL v2.1
+ * Please read http://www.gnu.org/copyleft/lgpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.rules.definitions;
+
+//External Imports
+
+//Internal Imports
+import java.util.ArrayList;
+
+import javax.vecmath.AxisAngle4d;
+import javax.vecmath.Matrix3d;
+import javax.vecmath.Vector3d;
+
+import org.chefx3d.model.*;
+import org.chefx3d.rules.properties.ChefX3DRuleProperties;
+import org.chefx3d.rules.util.RulePropertyAccessor;
+
+/**
+ * Attempt to span entity between nearest neighbors. Applies to add and move
+ * commands.
+ *
+ * @author Ben Yarger
+ * @version $Revision: 1.22 $
+ */
+public class AutoSpanRule extends Rule {
+
+    /** This product cannot fit in space status message */
+    private static final String STATUS_MSG_SPACE_TOO_SMALL =
+        "org.chefx3d.rules.definitions.AutoSpanRule.statusMsgMinSpanLmt";
+
+    /** This product cannot span space status message */
+    private static final String STATUS_MSG_SPACE_TOO_LARGE =
+        "org.chefx3d.rules.definitions.AutoSpanRule.statusMsgMaxSpanLmt";
+
+    /** This product has been adjusted to span space status message */
+    private static final String STATUS_MSG_SPAN =
+        "org.chefx3d.rules.definitions.AutoSpanRule.statusMsg";
+
+    /** This product cannot be spanned in it's current position */
+    private static final String STATUS_MSG_INVALID_POS =
+        "org.chefx3d.rules.definitions.AutoSpanRule.invalidPosition";
+
+    /** This product cannot fit in space pop up message */
+    private static final String POP_UP_MSG_SPACE_TOO_SMALL =
+        "org.chefx3d.rules.definitions.AutoSpanRule.popUpMsgMinSpanLmt";
+
+    /** This product cannot span space pop up message */
+    private static final String POP_UP_MSG_SPACE_TOO_LARGE =
+        "org.chefx3d.rules.definitions.AutoSpanRule.popUpMsgMaxSpanLmt";
+
+    /** This product cannot span space pop up message */
+    private static final String POP_UP_MSG_INVALID_WALL_ANGLE=
+        "org.chefx3d.rules.definitions.AutoSpanRule.invalidWallAngle";
+
+    /** Static class instance */
+    private static AutoSpanRule rule =
+        new AutoSpanRule();
+
+    /**
+     * Private constructor. All Rule classes should be implemented this way.
+     */
+    private AutoSpanRule(){
+
+        ruleType = RULE_TYPE.INVIOLABLE;
+    }
+
+    /**
+     * Return class instance
+     * @return CanScaleRule
+     */
+    public static AutoSpanRule getInstance(){
+        return rule;
+    }
+
+    @Override
+    protected boolean performCheck(
+            Entity entity,
+            WorldModel model,
+            Command command) {
+
+        Boolean autoSpan = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.SPAN_OBJECT_PROP);
+
+        if(autoSpan == null || autoSpan == false){
+            return true;
+        }
+        float[] size = new float[3];
+        double[] origPos = new double[3];
+        double[] pos = new double[3];
+        float[] scale = new float[3];
+
+        /*
+         * If not a positionable entity, don't bother with rule execution
+         */
+        if(entity instanceof PositionableEntity){
+            ((PositionableEntity)entity).getSize(size);
+            ((PositionableEntity)entity).getScale(scale);
+
+        } else {
+           return true;
+
+        }
+
+        float[] mousePos = new float[3];
+        view.getZoneRelativeMousePosition(mousePos);
+        Float zOffset = (Float)
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.SPAN_OBJECT_DEPTH_OFFSET_PROP);
+        /*
+         * Extract position, if unable to based on command type don't bother
+         * with rule execution
+         */
+        if(command instanceof AddEntityChildCommand){
+
+            ((PositionableEntity)entity).getPosition(origPos);
+
+            int groupingID = ((AddEntityChildCommand)command).getGroupingID();
+
+            if (groupingID > 0 && (
+                    entity.getTemplateEntityID() >= 0 ||
+                    entity.getKitEntityID() >= 0)) {
+                pos[0] = origPos[0];
+                pos[1] = origPos[1];
+            } else {
+                pos[0] = mousePos[0];
+                pos[1] = mousePos[1];
+            }
+
+            if (zOffset != null) {
+                pos[2] = zOffset;
+            }
+
+            Entity parentEntity =
+                ((AddEntityChildCommand)command).getParentEntity();
+            if (!(parentEntity instanceof ZoneEntity)) {
+                parentEntity = getParentZoneEntity(model, parentEntity);
+                ((AddEntityChildCommand)command).setParentEntity(parentEntity);
+            }
+            entity.setParentEntityID(parentEntity.getEntityID());
+
+        } else if (command instanceof AddEntityChildTransientCommand){
+
+            ((PositionableEntity)entity).getPosition(origPos);
+
+            int groupingID = ((AddEntityChildCommand)command).getGroupingID();
+
+            if (groupingID > 0 && (
+                    entity.getTemplateEntityID() >= 0 ||
+                    entity.getKitEntityID() >= 0)) {
+                pos[0] = origPos[0];
+                pos[1] = origPos[1];
+            } else {
+                pos[0] = mousePos[0];
+                pos[1] = mousePos[1];
+            }
+
+            if (zOffset != null) {
+                pos[2] = zOffset;
+            }
+
+            Entity parentEntity =
+                ((AddEntityChildTransientCommand)command).getParentEntity();
+            if (!(parentEntity instanceof ZoneEntity)) {
+                parentEntity = getParentZoneEntity(model, parentEntity);
+                ((AddEntityChildCommand)command).setParentEntity(parentEntity);
+            }
+            entity.setParentEntityID(parentEntity.getEntityID());
+
+        } else if (command instanceof MoveEntityCommand){
+
+            ((MoveEntityCommand)command).getEndPosition(origPos);
+
+            pos[0] = mousePos[0];
+            pos[1] = origPos[1];
+            if(zOffset != null){
+                pos[2] = zOffset;
+            }
+
+        } else if (command instanceof MoveEntityTransientCommand){
+
+            ((MoveEntityTransientCommand)command).getPosition(origPos);
+
+            pos[0] = mousePos[0];
+            pos[1] = origPos[1];
+            if(zOffset != null){
+                pos[2] = zOffset;
+            }
+
+        } else if (command instanceof TransitionEntityChildCommand){
+            ((TransitionEntityChildCommand)command).getEndPosition(origPos);
+
+            pos[0] = mousePos[0];
+            pos[1] = origPos[1];
+            if(zOffset != null){
+                pos[2] = zOffset;
+            }
+
+            Entity parentEntity =
+                ((TransitionEntityChildCommand)command).getEndParentEntity();
+            entity.setParentEntityID(parentEntity.getEntityID());
+
+        } else {
+            return true;
+        }
+
+        /*
+         * Get minimum and maximum sizes allowed
+         */
+        float[] maximumSize = (float[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.MAXIMUM_OBJECT_SIZE_PROP);
+
+        float[] minimumSize = (float[])
+            RulePropertyAccessor.getRulePropertyValue(
+                entity,
+                ChefX3DRuleProperties.MINIMUM_OBJECT_SIZE_PROP);
+
+        /*
+         * Calculate the horizontal span
+         */
+
+        boolean result =
+            calculateXSpan(
+                pos,
+                size,
+                scale,
+                maximumSize,
+                minimumSize,
+                model,
+                entity,
+                command);
+
+        return result;
+    }
+
+    /**
+     * Calculate the horizontal span adjustment that should occur.
+     *
+     * @param pos Current entity position
+     * @param size Current entity size
+     * @param scale Current entity scale
+     * @param maximumSize Maximum allowable size
+     * @param minimumSize Mimimum allowable size
+     * @param model WorldModel
+     * @param entity Entity being acted on
+     * @param command Command causing the action
+     * @return True if command should continue, false otherwise
+     */
+    private boolean calculateXSpan(
+            double[] pos,
+            float[] size,
+            float[] scale,
+            float[] maximumSize,
+            float[] minimumSize,
+            WorldModel model,
+            Entity entity,
+            Command command){
+        /*
+         * Prepare entity with data we want to use
+         */
+        double[] origPos = new double[3];
+        float[] origScale = new float[3];
+        float[] origSize = new float[3];
+
+        ((PositionableEntity)entity).getPosition(origPos);
+        ((PositionableEntity)entity).getScale(origScale);
+        ((PositionableEntity)entity).getSize(origSize);
+
+        float[] tmpScale = new float[3];
+        tmpScale[0] = 0.01f/origSize[0];
+        tmpScale[1] = origScale[1];
+        tmpScale[2] = origScale[2];
+
+        ((PositionableEntity)entity).setPosition(pos, false);
+        ((PositionableEntity)entity).setScale(tmpScale);
+
+        /*
+         * Get nearest neighbor entities
+         */
+        ArrayList<Entity> negativeXNeighbors =
+            getNegativeXNeighbors(model, (PositionableEntity) entity, null);
+
+        ArrayList<Entity> positiveXNeighbors =
+            getPositiveXNeighbors(model, (PositionableEntity) entity, null);
+//System.out.println("POSITIVE NEAREST NEIGHBORS: " + positiveXNeighbors);
+//System.out.println("NEGATIVE  NEAREST NEIGHBORS: " + negativeXNeighbors);
+
+        /*
+         * Reset original entity position
+         */
+        ((PositionableEntity)entity).setPosition(
+                origPos,
+                command.isTransient());
+
+        ((PositionableEntity)entity).setScale(origScale);
+
+        /*
+         * Do legit data check
+         */
+        if(negativeXNeighbors == null ||
+                negativeXNeighbors.size() == 0 ||
+                positiveXNeighbors == null ||
+                positiveXNeighbors.size() == 0){
+
+            return false;
+        }
+
+        // Remove all nearest neighbors that go on auto spans
+        for (int i = negativeXNeighbors.size()-1; i >= 0; i--) {
+
+            Boolean goesOnAutoSpan = (Boolean)
+                RulePropertyAccessor.getRulePropertyValue(
+                        negativeXNeighbors.get(i),
+                        ChefX3DRuleProperties.CAN_PLACE_ON_SPAN_OBJECT);
+
+            if (goesOnAutoSpan) {
+                negativeXNeighbors.remove(i);
+            }
+        }
+
+        for (int i = positiveXNeighbors.size()-1; i >= 0; i--) {
+
+            Boolean goesOnAutoSpan = (Boolean)
+            RulePropertyAccessor.getRulePropertyValue(
+                    positiveXNeighbors.get(i),
+                    ChefX3DRuleProperties.CAN_PLACE_ON_SPAN_OBJECT);
+
+            if (goesOnAutoSpan) {
+                negativeXNeighbors.remove(i);
+            }
+        }
+
+        /*
+         * Do secondary legit data check
+         */
+        if(negativeXNeighbors.size() == 0 ||
+                positiveXNeighbors.size() == 0){
+
+            return false;
+        }
+
+        //check angle of adjacent walls if any
+        //if not 90 degrees return false
+
+
+        Entity negXNeighbor = negativeXNeighbors.get(0);
+        Entity posXNeighbor = positiveXNeighbors.get(0);
+
+        /*
+         * Extract neighbor position and bounds data
+         */
+        double[] negXNeighborPos = new double[3];
+        double[] posXNeighborPos = new double[3];
+        float[] negXNeighborBounds = new float[6];
+        float[] posXNeighborBounds = new float[6];
+
+        boolean posAdjacent = false;
+        boolean negAdjacent = false;
+
+
+        Entity parentZone = null;
+        Entity entityParentZone =  getParentZoneEntity(model, entity);
+        boolean invalidAngle = false;
+        int angle = 90;
+        int angleTruncate= 0;
+
+        if (entityParentZone instanceof SegmentEntity) {
+            // Checks to determine if either wall is not a 90 degree
+            // if it is not does not allow the autospan to occur
+            Vector3d entityDirectionVector=
+                ((SegmentEntity)entityParentZone).getFaceVector();
+
+            Vector3d adjacentDirectionVector=null;
+
+
+            if(negXNeighbor.getType() == Entity.TYPE_SEGMENT) {
+                if(negXNeighbor.getParentEntityID() != entity.getParentEntityID()) {
+
+                        invalidAngle =  isWallAtSpecificAngle(
+                                model,
+                                entity,
+                                entityParentZone,
+                                false,
+                                angle);
+
+                }
+            }
+        }
+
+        if(posXNeighbor.getType() == Entity.TYPE_SEGMENT) {
+            if(posXNeighbor.getParentEntityID() != entity.getParentEntityID()) {
+
+                if(!invalidAngle) {
+                    invalidAngle =  isWallAtSpecificAngle(
+                            model,
+                            entity,
+                            entityParentZone,
+                            true,
+                            angle);
+                }
+            }
+        }
+
+        if(invalidAngle) {
+            if(command.isTransient()) {
+                String msg = intl_mgr.getString(POP_UP_MSG_INVALID_WALL_ANGLE);
+                statusBar.setMessage(msg);
+            }else {
+                String msg = intl_mgr.getString(POP_UP_MSG_INVALID_WALL_ANGLE);
+                popUpMessage.showMessage(msg);
+            }
+            return false;
+        }
+        /*
+         * Extract zone respective positions of nearest neighbors
+         */
+        if (negXNeighbor instanceof SegmentEntity){
+
+            VertexEntity endVertex =
+                ((SegmentEntity)negXNeighbor).getEndVertexEntity();
+
+            negXNeighborPos[0] = 0;
+            negXNeighborPos[1] = endVertex.getHeight();
+            negXNeighborPos[2] = 0.0;
+
+            negXNeighborBounds[0] = 0.0f;
+            negXNeighborBounds[1] = 0.0f;
+            negXNeighborBounds[2] = 0.0f;
+            negXNeighborBounds[3] = 0.0f;
+            negXNeighborBounds[4] = 0.0f;
+            negXNeighborBounds[5] = 0.0f;
+
+        } else if(negXNeighbor instanceof PositionableEntity){
+
+            parentZone = getParentZoneEntity(model, negXNeighbor);
+            if(parentZone != entityParentZone) {
+                negAdjacent = true;
+            }
+
+            negXNeighborPos =
+                getRelativePosition(model, negXNeighbor, parentZone, false);
+
+            ((PositionableEntity)negXNeighbor).getBounds(negXNeighborBounds);
+
+        } else {
+
+            return false;
+
+        }
+
+
+        if (posXNeighbor instanceof SegmentEntity){
+
+            SegmentEntity parentSegment =
+                (SegmentEntity) getParentZoneEntity(model, entity);
+
+
+
+            VertexEntity parentEndVertex =
+                parentSegment.getEndVertexEntity();
+
+
+            posXNeighborPos[0] = parentSegment.getLength();
+            posXNeighborPos[1] = parentEndVertex.getHeight();
+            posXNeighborPos[2] = 0.0;
+
+            posXNeighborBounds[0] = 0.0f;
+            posXNeighborBounds[1] = 0.0f;
+            posXNeighborBounds[2] = 0.0f;
+            posXNeighborBounds[3] = 0.0f;
+            posXNeighborBounds[4] = 0.0f;
+            posXNeighborBounds[5] = 0.0f;
+
+        } else if(posXNeighbor instanceof PositionableEntity){
+
+
+            parentZone = getParentZoneEntity(model, posXNeighbor);
+            if(parentZone != entityParentZone) {
+                posAdjacent = true;
+            }
+
+            posXNeighborPos =
+                getRelativePosition(model, posXNeighbor, parentZone, false);
+
+            ((PositionableEntity)posXNeighbor).getBounds(posXNeighborBounds);
+
+        } else {
+
+            return false;
+
+        }
+
+        /*
+         * Calculate horizontal span distance and make sure it
+         * fits within the tollerances
+         */
+         double negXSide = 0;
+         double posXSide  = 0;
+
+
+         if(negAdjacent) {
+
+             negXSide =negXNeighborPos[2]+ negXNeighborBounds[5];
+
+         }else {
+             negXSide = negXNeighborPos[0] + negXNeighborBounds[1];
+         }
+
+         //check to see if the positive neighbor is on an adjacent zone
+        if(posAdjacent) {
+
+            //checks to see if the zone is a segment
+            //TODO: will need to case out other type of zones as we find them
+            if(entityParentZone.getType() == Entity.TYPE_SEGMENT) {
+
+
+                Matrix3d rotation = new Matrix3d();
+                rotation.setIdentity();
+
+                AxisAngle4d rotateAxis = new AxisAngle4d(0,1,0,angle);
+
+                rotation.set(rotateAxis);
+
+                Vector3d position = new Vector3d(posXNeighborPos[0],posXNeighborPos[1], posXNeighborPos[2]);
+                double length = ((SegmentEntity)entityParentZone).getLength();
+
+                rotation.transform(position);
+
+                int index = 4;
+
+
+                posXSide = (length - position.x)  + posXNeighborBounds[index];
+
+
+            }
+        }else{
+            posXSide = posXNeighborPos[0] + posXNeighborBounds[0];
+        }
+
+
+        double span = posXSide - negXSide + SPAN_OVERLAP_THRESHOLD;
+
+        if (span <= 0) {
+            if(command.isTransient()){
+                String msg = intl_mgr.getString(STATUS_MSG_INVALID_POS);
+                statusBar.setMessage(msg);
+            } else {
+                String msg = intl_mgr.getString(STATUS_MSG_INVALID_POS);
+                popUpMessage.showMessage(msg);
+
+                // reset the scale and position because the transient
+                // commands have adjusted them
+                ((PositionableEntity)entity).getStartingPosition(origPos);
+                return handleCommand(model, command, entity, origPos, origScale, false);
+
+            }
+
+            return false;
+        }
+
+
+        if(maximumSize != null){
+
+            if(maximumSize[0] < span){
+
+                if(command.isTransient()){
+                    String msg = intl_mgr.getString(STATUS_MSG_SPACE_TOO_LARGE);
+                    statusBar.setMessage(msg);
+                } else {
+                    String msg = intl_mgr.getString(POP_UP_MSG_SPACE_TOO_LARGE);
+                    popUpMessage.showMessage(msg);
+
+                    // reset the scale and position because the transient
+                    // commands have adjusted them
+                    ((PositionableEntity)entity).getStartingPosition(origPos);
+                    return handleCommand(model, command, entity, origPos, origScale, false);
+
+                }
+
+                return false;
+            }
+        }
+
+        if(minimumSize != null){
+
+            if(minimumSize[0] > span){
+
+                if(command.isTransient()){
+                    String msg = intl_mgr.getString(STATUS_MSG_SPACE_TOO_SMALL);
+                    statusBar.setMessage(msg);
+                } else {
+                    String msg = intl_mgr.getString(POP_UP_MSG_SPACE_TOO_SMALL);
+                    popUpMessage.showMessage(msg);
+
+                    // reset the scale and position because the transient
+                    // commands have adjusted them
+                    ((PositionableEntity)entity).getStartingPosition(origPos);
+                    return handleCommand(model, command, entity, origPos, origScale, false);
+
+                }
+
+                return false;
+            }
+        }
+
+        scale[0] = (float) (span / size[0]);
+
+        /*
+         * Calculate zone positioning for entity
+         */
+         parentZone = getParentZoneEntity(model, entity);
+
+        int parentID = entity.getParentEntityID();
+        Entity parentEntity = model.getEntity(parentID);
+
+        if(parentEntity == null){
+            parentEntity = parentZone;
+        }
+
+        double[] parentZonePos =
+            getRelativePosition(model, parentEntity, parentZone, false);
+
+        double newXPos = negXSide + span/2.0 - (SPAN_OVERLAP_THRESHOLD/2.0);
+
+        pos[0] = newXPos - parentZonePos[0];
+
+        return handleCommand(model, command, entity, pos, scale, true);
+    }
+
+    /**
+     * Handle command responses to span calculation
+     *
+     * @param model WorldModel
+     * @param command Issued command
+     * @param entity Entity acted on by command
+     * @param pos New entity position
+     * @param scale New entity scale
+     * @param passed The pass/fail flag
+     * @return False is new command issued, false is execution should continue
+     */
+    private boolean handleCommand(
+            WorldModel model,
+            Command command,
+            Entity entity,
+            double[] pos,
+            float[] scale,
+            boolean passed){
+
+        /*
+         * Handle results accordingly
+         */
+        if(command instanceof AddEntityChildCommand){
+
+            if (passed) {
+
+                entity.setParentEntityID(-1);
+
+                ((PositionableEntity)entity).setPosition(
+                        pos,
+                        command.isTransient());
+
+                ((PositionableEntity)entity).setScale(scale);
+
+            } else {
+
+                ((RuleDataAccessor)command).setCommandShouldDie(true);
+
+                return false;
+
+            }
+
+        } else if (command instanceof AddEntityChildTransientCommand){
+
+            if (passed) {
+
+                entity.setParentEntityID(-1);
+
+                ((PositionableEntity)entity).setPosition(
+                        pos,
+                        command.isTransient());
+
+                ((PositionableEntity)entity).setScale(scale);
+
+            } else {
+
+                ((RuleDataAccessor)command).setCommandShouldDie(true);
+
+                return false;
+
+            }
+
+        } else if (command instanceof MoveEntityCommand){
+
+            float[] startScale = new float[3];
+            double[] startPos = new double[3];
+
+            //((PositionableEntity)entity).setPosition(pos, command.isTransient());
+            //((PositionableEntity)entity).setScale(scale);
+
+            ((PositionableEntity)entity).getStartingScale(startScale);
+            ((MoveEntityCommand)command).getStartPosition(startPos);
+
+            int transID = model.issueTransactionID();
+            ScaleEntityCommand cmd = new ScaleEntityCommand(
+                    model,
+                    transID,
+                    entity.getEntityID(),
+                    pos,
+                    startPos,
+                    scale,
+                    startScale);
+
+            // --- Remove any children of auto spans
+            ArrayList<Command> altCmdList = new ArrayList<Command>();
+            ArrayList<Entity> childrenToRemove = entity.getChildren();
+
+            altCmdList.add(cmd);
+
+            for (Entity childToRemove : childrenToRemove) {
+
+                RemoveEntityChildCommand rmvCmd =
+                    new RemoveEntityChildCommand(
+                            model,
+                            entity,
+                            childToRemove);
+
+                altCmdList.add(rmvCmd);
+            }
+
+            MultiCommand multCmd =
+                new MultiCommand(
+                        altCmdList,
+                        "AutoSpanRule -> MoveEntityCommand converted to " +
+                        "ScaleEntityCommand and remove children",
+                        true,
+                        false);
+
+            model.applyCommand(multCmd);
+
+            ((RuleDataAccessor)command).setCommandShouldDie(true);
+
+            return false;
+
+        } else if (command instanceof MoveEntityTransientCommand){
+
+            int transID = model.issueTransactionID();
+            ScaleEntityTransientCommand cmd =
+                new ScaleEntityTransientCommand(
+                    model,
+                    transID,
+                    entity.getEntityID(),
+                    pos,
+                    scale);
+
+            // --- Remove any children of auto spans
+            ArrayList<Command> altCmdList = new ArrayList<Command>();
+            ArrayList<Entity> childrenToRemove = entity.getChildren();
+
+            altCmdList.add(cmd);
+
+            for (Entity childToRemove : childrenToRemove) {
+
+                RemoveEntityChildCommand rmvCmd =
+                    new RemoveEntityChildCommand(
+                            model,
+                            entity,
+                            childToRemove);
+
+                altCmdList.add(rmvCmd);
+            }
+
+            MultiTransientCommand multCmd =
+                new MultiTransientCommand(
+                        altCmdList,
+                        "AutoSpanRule -> MoveEntityTransientCommand " +
+                        "converted to ScaleEntityTransientCommand and " +
+                        "remove children",
+                        false);
+
+            model.applyCommand(multCmd);
+
+            ((RuleDataAccessor)command).setCommandShouldDie(true);
+
+            return false;
+
+        } else if (command instanceof TransitionEntityChildCommand){
+
+            int transID = model.issueTransactionID();
+            ScaleEntityTransientCommand cmd =
+                new ScaleEntityTransientCommand(
+                    model,
+                    transID,
+                    entity.getEntityID(),
+                    pos,
+                    scale);
+
+            // --- Remove any children of auto spans
+            ArrayList<Command> altCmdList = new ArrayList<Command>();
+            ArrayList<Entity> childrenToRemove = entity.getChildren();
+
+            altCmdList.add(cmd);
+
+            for (Entity childToRemove : childrenToRemove) {
+
+                RemoveEntityChildCommand rmvCmd =
+                    new RemoveEntityChildCommand(
+                            model,
+                            entity,
+                            childToRemove);
+
+                altCmdList.add(rmvCmd);
+            }
+
+            MultiCommand multCmd =
+                new MultiCommand(
+                        altCmdList,
+                        "AutoSpanRule -> TransitionEntityChildCommand " +
+                        "converted to ScaleEntityTransientCommand and " +
+                        "remove children",
+                        true,
+                        false);
+
+            addNewlyIssuedCommand(multCmd);
+
+            float[] startScale = new float[3];
+
+            ((PositionableEntity)entity).getScale(startScale);
+
+            ((TransitionEntityChildCommand)command).setEndPosition(pos);
+            ((TransitionEntityChildCommand)command).setEndScale(scale);
+            ((TransitionEntityChildCommand)command).setStartScale(startScale);
+
+        }
+
+        return true;
+    }
+}

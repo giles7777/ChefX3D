@@ -1,0 +1,52 @@
+<html>
+<head>
+<title>ChefX3D - World Model Design</title>
+</head>
+
+<body>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+</center>
+
+<h1 align=center>World Model Design</h1>
+
+<p>
+The model is the backing store for the current list of entities.  It receives
+notification of all changes to entities.
+</p>
+
+<hr/>
+
+<a name="Concepts">
+<h2>Concepts</h2></a>
+
+<p>
+The simplist Model might store the the list in memory locally.  More
+complex models might synchronize distributed updates to a shared model.
+</p>
+All changes to the model should be absolute changes.  No delta changes
+like positionAdded().  This allows the network distribution of the changes.
+
+<h3>Undo/Redo</h3>
+A model shall be able to undo/redo changes.  The command list will be a global list of
+changes made to the model.
+<hr>
+
+<h2>Open Issues</h2>
+
+<hr>
+<center>
+[ <a href="../index.html">Home</a> ]
+[ <a href="index.html">Architecture</a> ]
+[ <a href="../requirements/index.html">Requirements</a> ]
+[ <a href="../misc/index.html">Miscellaneous</a> ]
+<br>
+<i>Last Updated: $Date: 2007/03/14 15:58:26 $<br>
+Version: $Revision: 1.1 $</I>
+</center>
+
+</body>
+</html>

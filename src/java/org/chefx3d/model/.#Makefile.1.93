@@ -1,0 +1,143 @@
+#*********************************************************************
+#
+#  (C) 2001 Yumetech, Inc
+#    http://www.yumetech.com/
+# 
+# Package makefile for the org.web3d.chefx3d.model directory
+#
+# Author: Alan Hudson
+# Version: $Revision: 1.93 $
+#
+#*********************************************************************
+
+PACKAGE = org.chefx3d.model
+
+# The source files to compile. These are declared in order that they must be
+# compiled in
+SOURCE = \
+  RuleBypassFlag.java \
+  MultiplicityConstraint.java \
+  ModelChangeException.java \
+  LoadToolException.java \
+  Command.java \
+  DeadReckonedCommand.java \
+  CommandListener.java \
+  CommandController.java \
+  CommandValidator.java \
+  CommandWrapper.java \
+  ExecuteCommand.java \
+  UndoCommand.java \
+  RedoCommand.java \
+  BufferedCommandController.java \
+  DefaultCommandController.java \
+  Selection.java \
+  EntityProperty.java \
+  EntitySelectionListener.java \
+  EntitySelectionListenerHandler.java \
+  EntityPropertyListener.java \
+  EntityPropertyListenerHandler.java \
+  EntityPropertyListenerMulticaster.java \
+  EntityChildListener.java \
+  EntityChildListenerHandler.java \
+  EntityPositionListener.java \
+  IdIssuer.java \
+  Entity.java \
+  BaseEntity.java \
+  PositionableData.java \
+  PositionableEntity.java \
+  BasePositionableEntity.java \
+  TemplateEntity.java \
+  ModelListener.java \
+  ModelListenerHandler.java \
+  PropertyStructureListener.java \
+  WorldModel.java \
+  RuleDataAccessor.java \
+  ValidatingBufferedCommandController.java \
+  PropertyValidator.java \
+  AbstractProperty.java \
+  ListProperty.java \
+  AssociateProperty.java \
+  MultiCommand.java \
+  MultiTransientCommand.java \
+  AddEntityPropertyCommand.java \
+  RemoveEntityPropertyCommand.java \
+  AddPropertySheetCommand.java \
+  RemovePropertySheetCommand.java \
+  InsertEntityChildCommand.java \
+  ViewpointEntity.java \
+  ViewpointContainerEntity.java \
+  ContentContainerEntity.java \
+  EnvironmentEntity.java \
+  LocationEntity.java \
+  ZoneEntity.java \
+  SceneEntity.java \
+  AbstractVertexTool.java \
+  AbstractSegmentTool.java \
+  VertexEntity.java \
+  SegmentEntity.java \
+  SegmentableEntity.java \
+  BaseSegmentableEntity.java \
+  DefaultSegmentableEntity.java \
+  DefaultPositionableEntity.java \
+  DefaultEntity.java \
+  DefaultBuildingEntity.java \
+  WorldExporter.java \
+  BaseWorldModel.java \
+  DefaultWorldModel.java \
+  MultiRevertCommand.java \
+  SelectEntityCommand.java \
+  EntitySelectionHelper.java \
+  SelectZoneCommand.java \
+  AddEntityChildCommand.java \
+  AddEntityChildTransientCommand.java \
+  AddEntityCommand.java \
+  MoveEntityCommand.java \
+  MoveEntityTransientCommand.java \
+  MoveSegmentCommand.java \
+  MoveSegmentTransientCommand.java \
+  RotateEntityCommand.java \
+  RotateEntityTransientCommand.java \
+  RemoveEntityCommand.java \
+  RemoveEntityChildCommand.java \
+  RemoveEntityChildTransientCommand.java \
+  ScaleEntityCommand.java \
+  ScaleEntityTransientCommand.java \
+  AddVertexCommand.java \
+  AddSegmentCommand.java \
+  AddVertexTransientCommand.java \
+  AddSegmentTransientCommand.java \
+  SplitSegmentCommand.java \
+  UpdateVertexCommand.java \
+  MoveVertexCommand.java \
+  MoveVertexTransientCommand.java \
+  RemoveVertexCommand.java \
+  RemoveSegmentCommand.java \
+  ChangePropertyCommand.java \
+  ChangePropertyTransientCommand.java \
+  ClearModelCommand.java \
+  ChangeViewCommand.java \
+  ChangeViewTransientCommand.java \
+  ChangeMasterCommand.java \
+  TransitionEntityChildCommand.java\
+  WorldModelFactory.java \
+  ValidationErrorListener.java \
+  ModelValidator.java \
+  DefaultModelValidator.java \
+  Importer.java \
+  Exporter.java \
+  AbstractExporter.java \
+  X3DExporter.java \
+  SMALExporter.java \
+  SMALImporter.java \
+  CommandUtils.java \
+  ClearHistoryCommand.java
+
+# The list of other files we need to copy from this directory to the classes
+# directory when we are making JAR files.
+EXTRA = 
+
+# If the package requires extra classes outside the JDK, the JAR files that 
+# are required are listed here. These should be found in ${PROJECT_ROOT}/lib
+JARS_3RDPARTY = vecmath.jar smack.jar smackx.jar xj3d-sai_2.0.0.jar j3d-org-all_0.9.0.jar
+
+include ${PROJECT_ROOT}/make/Makefile.jav

@@ -1,0 +1,624 @@
+/*****************************************************************************
+ *                        Copyright Yumetech, Inc (c) 2009
+ *                               Java Source
+ *
+ * This source is licensed under the GNU GPL v2.1
+ * Please read http://www.gnu.org/copyleft/gpl.html for more information
+ *
+ * This software comes with the standard NO WARRANTY disclaimer for any
+ * purpose. Use it at your own risk. If there's a problem you get to fix it.
+ *
+ ****************************************************************************/
+
+package org.chefx3d.view.awt.av3d;
+
+// External Imports
+import java.awt.BorderLayout;
+import java.awt.Component;
+import java.awt.Dimension;
+import java.awt.Frame;
+import java.awt.Point;
+
+import java.awt.event.ActionEvent;
+import java.awt.event.ActionListener;
+
+import java.awt.image.BufferedImage;
+
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+
+import javax.swing.JButton;
+import javax.swing.JDialog;
+import javax.swing.JProgressBar;
+
+import javax.vecmath.Matrix4f;
+
+import org.chefx3d.model.*;
+
+import org.chefx3d.util.ApplicationParams;
+
+import org.chefx3d.view.awt.SceneEffectsListener;
+import org.chefx3d.view.awt.SceneEffectsRequest;
+
+import org.chefx3d.view.awt.scenemanager.PerFrameObserver;
+import org.chefx3d.view.awt.scenemanager.SceneManagerObserver;
+
+import org.j3d.aviatrix3d.Scene;
+import org.j3d.aviatrix3d.ViewEnvironment;
+
+/**
+ * A blocking dialog that accepts a SceneManagerObserver, a list of EntityIDs,
+ * and a CommandController in order to execute the following sequence of steps:
+ *
+ * First:  A ThumbnailProcessor is created, and added to the scene, via the
+ *         SceneManagerObserver
+ *
+ * Second: This class will iterate through the EntityIDs, and select them one at
+ *         a time, and take a thumbnail while each is selected.
+ *
+ * Third:  The captured thumbnails are returned.
+ *
+ * @author christopher
+ * @version $Revision: 1.3 $
+ */
+public class PreviewThumbnailCreator extends JDialog implements
+    PerFrameObserver,
+    ThumbnailListener,
+    ActionListener,
+    SceneEffectsListener,
+    EntitySelectionListener {
+
+    /**
+     * Text for the capturing button.
+     * TODO:  Internationalise
+     */
+    private static final String BUTTON_TEXT = "Capture thumbnail index: ";
+
+    /** Number of frames to wait before issuing capture call */
+    private static final int CAPTURE_FRAME_DELAY = 10;
+
+    /** Singleton panel to do all the work. */
+    private static PreviewThumbnailCreator creator;
+
+    /** The height of the generated thumbnails */
+    private static final int THUMBNAIL_HEIGHT = 250;
+
+    /** Width of the generated thumbnails */
+    private static final int THUMBNAIL_WIDTH = 250;
+
+    /** The list of thumbnails generated */
+    private static ArrayList<BufferedImage> thumbnails;
+
+    /** The Preview instance */
+    private Preview preview;
+
+    /** The PreviewLayerManager instance */
+    private PreviewLayerManager plm;
+
+    /** Visibility handler, for imaging zones */
+    private LocationVisibilityHandler vis_orthographic;
+
+    /** Visibility handler, for imaging perspective views */
+    private PreviewVisibilityHandler vis_perspective;
+
+    /** Zone viewpoint calculator */
+    private ZoneView zoneView;
+
+    /** The scene manager Observer*/
+    private SceneManagerObserver mgmtObserver;
+
+    /** The location that is being imaged */
+    private LocationEntity location;
+
+    /** An orthographic viewpoint entity for zone imaging */
+    private ViewpointEntity ortho;
+
+    /** List of entities that need to be selected before imaging */
+    private Entity[] entities;
+
+    /** CommandController to do the selecting */
+    private CommandController controller;
+
+    /** The RenderEffectsProcessor that does thumbnailing */
+    private ThumbnailProcessor processor;
+
+    /** The world model, to look up entities */
+    private WorldModel model;
+
+    /** A copy of the sceneEffectsRequest */
+    private SceneEffectsRequest sceneEffectsRequest;
+
+    /** Index into the entities array, to know which one to select
+     *  and then thumbnail next. */
+    private int index;
+
+    /** The button that allows for UI driven capturing, to provide a real
+     *  awesome interactive look into the thumbnail capturing. */
+    private JButton captureButton;
+
+    /** Progress bar to indicate how much more work is to be done */
+    private JProgressBar captureProgress;
+
+    /** Determine which mode we're in, because the UI elements are different */
+    private boolean debugMode = false;
+
+    /** Sidepocketed ground normal for the location */
+    private float[] groundNormal;
+
+    /** Flags indicating resource availability */
+    private boolean sceneReady;
+    private boolean locationReady;
+
+    /**
+     * Constructor, private because a return value is needed as a result of displaying this
+     * dialog.  Invoking this constructor doesn't do anything but initialize variables, and
+     * register as a PerFrameObserver.
+     *
+     * @param owner The parent frame
+     * @param previewParam The Preview UI component
+     * @param scene The Scene being displayed
+     * @param sceneMgmtObserver The SceneManagerObserver in charge of the Scene
+     * @param commandController The CommandController for selection commands
+     * @param worldModel
+     * @param locationEntity The LocationEntity ancestor of the entities to be imaged
+     * @param entityArray The entities to image, either ViewpointEntity(s) or
+     * ZoneEntity(s).
+
+     */
+    private PreviewThumbnailCreator(
+        Frame owner,
+        Preview previewParam,
+        Scene scene,
+        SceneManagerObserver sceneMgmtObserver,
+        CommandController commandController,
+        WorldModel worldModel,
+        LocationEntity locationEntity,
+        Entity[] entityArray) {
+
+        // Modal.
+        super(owner, true);
+
+        preview = previewParam;
+        mgmtObserver = sceneMgmtObserver;
+        controller = commandController;
+        model = worldModel;
+        location = locationEntity;
+        entities = entityArray;
+
+        // ensure that the location is active
+        location.addEntitySelectionListener(this);
+        if (location.isSelected()) {
+            Command cmd = new SelectEntityCommand(model, location, false);
+            controller.execute(cmd);
+        }
+        Command cmd = new SelectEntityCommand(model, location, true);
+        controller.execute(cmd);
+
+        thumbnails = new ArrayList<BufferedImage>();
+
+        groundNormal = location.getGroundNormal();
+
+        plm = (PreviewLayerManager)preview.getLayerManager();
+        AV3DEntityManager mngr = plm.getAV3DEntityManager(location);
+
+        vis_orthographic = new LocationVisibilityHandler(mgmtObserver);
+        vis_orthographic.setEntityManager(mngr);
+
+        vis_perspective = plm.getVisibilityHandler();
+
+        zoneView = new ZoneView(
+            plm.getViewEnvironment(),
+            model,
+            controller,
+            null);
+        zoneView.setLocationEntity(location);
+        zoneView.setEntityManager(mngr);
+
+        debugMode = (Boolean)ApplicationParams.get(ApplicationParams.DEBUG_MODE);
+        if (debugMode) {
+            captureButton = new JButton(BUTTON_TEXT + "0");
+            captureButton.addActionListener(this);
+            captureButton.setEnabled(false);
+        } else {
+            captureProgress = new JProgressBar(JProgressBar.HORIZONTAL, 0, entities.length);
+        }
+
+        Dimension thumbnailSize = new Dimension(THUMBNAIL_WIDTH, THUMBNAIL_HEIGHT);
+        preview.setPreferredSize(thumbnailSize);
+
+        //
+        // create the ThumbnailProcessor and
+        // register as a thumbnail listener
+        //
+        processor = new ThumbnailProcessor();
+        processor.addThumbnailListener(this);
+
+        //
+        // EMF: SceneEffectsRequest takes a scene, a processor, and a
+        // caller.
+        //
+        // Calling mgmtObserver.addSceneEffectsRequest() means that
+        // the next time through the ApplicationUpdateObserver's
+        // updateSceneGraph() method, the SceneEffectRequest's execute()
+        // method will fire, which looks like this:
+        //
+        // execute() {
+        //      scene.setRenderEffectsProcessor(processor);
+        //      caller.sceneUpdated();
+        // }
+        //
+        // Therefore, after these two lines, the next time the Application-
+        // UpdateObserver fires updateSceneGraph(), sceneUpdated() is called.
+        //
+        // Chris:  And that execute command triggers the sceneUpdated()
+        //         callback within this class.  Notifying this class that
+        //         the processor has been registered.
+        sceneEffectsRequest =
+            new SceneEffectsRequest(scene, processor, this);
+        //mgmtObserver.addSceneEffectsRequest(sceneEffectsRequest);
+
+        //
+        // layout the components and set to visible
+        //
+        add(preview, BorderLayout.CENTER);
+
+        if (debugMode) {
+            add(captureButton, BorderLayout.SOUTH);
+        } else {
+            add(captureProgress, BorderLayout.SOUTH);
+        }
+
+        index = 0;
+        capture = -1;
+
+        this.pack();
+
+        // just for giggles, center the dialog on the screen
+        Dimension screenSize = getToolkit().getScreenSize();
+        Dimension dialogSize = getSize();
+        setLocation(
+            ((screenSize.width - dialogSize.width)/2),
+            ((screenSize.height - dialogSize.height)/2));
+
+        this.setVisible(true);
+    }
+
+    /**
+     * Constructor
+     *
+     * @param data
+     * @param location The LocationEntity ancestor of the entities to be imaged
+     * @param entities The entities to image, either ViwepointEntity(s) or
+     * ZoneEntity(s).
+     */
+    private PreviewThumbnailCreator(
+        ThumbnailData data,
+        LocationEntity location,
+        Entity[] entities) {
+
+        this(
+            data.getOwner(),
+            (Preview)data.getComp(),
+            data.getScene(),
+            data.getSceneManagerObserver(),
+            data.getController(),
+            data.getModel(),
+            location,
+            entities);
+    }
+
+    //---------------------------------------------------------------
+    // Methods defined by PerFrameObserver
+    //---------------------------------------------------------------
+
+    int capture;
+
+    /**
+     * A new frame tick is observed, so do some processing now.
+     */
+    public void processNextFrame() {
+        if (capture > 0) {
+            capture--;
+        } else if (capture == 0) {
+            processor.captureNextFrame();
+            capture = -1;
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    // Methods defined by ThumbnailListener
+    //-------------------------------------------------------------------------
+
+    /**
+     * Notification that a thumbnail has been generated
+     */
+    public void thumbnailGenerated(BufferedImage img) {
+        // Add the thumbnail to the list
+        thumbnails.add(img);
+        index++;
+        // Make sure there is more to do
+        if (index >= entities.length) {
+
+            mgmtObserver.removeObserver(this);
+            mgmtObserver.removeSceneEffectsRequest();
+
+            removeAll();
+            setVisible(false);
+            dispose();
+
+            // remove the temporary ortho viewpoint
+            if (ortho != null) {
+                ortho.removeEntitySelectionListener(this);
+
+                ViewpointContainerEntity vce =
+                    location.getViewpointContainerEntity();
+                Command cmd = new RemoveEntityChildCommand(model, vce, ortho, false);
+                controller.execute(cmd);
+            }
+
+            // restore viewpoint and navigation
+            location.setGroundNormal(groundNormal);
+
+            ViewpointContainerEntity vce = location.getViewpointContainerEntity();
+            List<ViewpointEntity> viewpoint_list = vce.getViewpoints();
+
+            String view_id = preview.getIdentifier();
+            for (ViewpointEntity vp : viewpoint_list) {
+                String id = (String)vp.getProperty(
+                    Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ViewpointEntity.VIEW_IDENTIFIER_PROP);
+
+                String name = (String) vp.getProperty(
+                    Entity.DEFAULT_ENTITY_PROPERTIES,
+                    ViewpointEntity.NAME_PROP);
+
+                if (AV3DConstants.DEFAULT_VIEWPOINT_NAME.equals(name) &&
+                    view_id.equals(id)) {
+
+                    if (vp.isSelected()) {
+                        Command cmd = new SelectEntityCommand(model, vp, false);
+                        controller.execute(cmd);
+                    }
+                    Command cmd = new SelectEntityCommand(model, vp, true);
+                    controller.execute(cmd);
+                    break;
+                }
+            }
+            vis_perspective.setEnabled(true);
+
+        } else {
+            if (debugMode) {
+                // Re-enable the capture button and update it's text
+                captureButton.setEnabled(true);
+                captureButton.setText(BUTTON_TEXT + index);
+            } else {
+                captureProgress.setValue(index);
+                generateThumbnail(index);
+            }
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    // Methods defined by ActionListener
+    //-------------------------------------------------------------------------
+
+    /**
+     * An action event has been dispatched
+     */
+    public void actionPerformed(ActionEvent e) {
+        Object src = e.getSource();
+        // If it's the capture button, do the next capture operation
+        if (src == captureButton) {
+            captureButton.setEnabled(false);
+            generateThumbnail(index);
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    // Methods defined by SceneEffectsListener
+    //-------------------------------------------------------------------------
+
+    public void sceneUpdated() {
+System.out.println("***Scene Ready");
+        sceneReady = true;
+        if (sceneReady && locationReady) {
+            mgmtObserver.addObserver(this);
+            if (debugMode) {
+                captureButton.setEnabled(true);
+            } else {
+                generateThumbnail(index);
+            }
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    // Methods defined by EntitySelectionListener
+    //-------------------------------------------------------------------------
+
+    /**
+     * A selection event has occured
+     */
+    public void selectionChanged(int entityID, boolean selection) {
+        // If it's a selection true event, then capture the next frame
+        Entity entity = model.getEntity(entityID);
+
+        if (selection) {
+            if (entity instanceof LocationEntity) {
+                location.removeEntitySelectionListener(this);
+                locationReady = true;
+                mgmtObserver.addSceneEffectsRequest(sceneEffectsRequest);
+
+            } else if (entity instanceof ViewpointEntity) {
+                if (debugMode) {
+                    processor.captureNextFrame();
+                } else {
+                    capture = CAPTURE_FRAME_DELAY;
+                }
+                if (!(entity == ortho)) {
+                    entity.removeEntitySelectionListener(this);
+                }
+            }
+        }
+    }
+
+    /**
+     * A highlighted event has occured
+     */
+    public void highlightChanged(int entityID, boolean selection) {
+        // Ignored
+    }
+
+    //-------------------------------------------------------------------------
+    // Local Methods - public
+    //-------------------------------------------------------------------------
+
+    /**
+     * Alternate entry point using the complex data structure
+     * that encapsulates all the information
+     * needed to create thumbnails.
+     *
+     * @param request
+     * @param location The LocationEntity ancestor of the entities to be imaged
+     * @param entities The entities to image, either ViewpointEntity(s) or
+     * ZoneEntity(s).
+     */
+    public static BufferedImage[] getThumbnails(
+        Thumbnailable request,
+        LocationEntity location,
+        Entity[] entities) {
+
+        if ((entities != null) && (entities.length > 0)) {
+            ThumbnailData data = request.getThumbnailData();
+            creator = new PreviewThumbnailCreator(data, location, entities);
+            return thumbnails.toArray(new BufferedImage[0]);
+        } else {
+            return new BufferedImage[0];
+        }
+    }
+
+    //-------------------------------------------------------------------------
+    // Local Methods - private
+    //-------------------------------------------------------------------------
+
+    /**
+     * Called by {@link #thumbnailGenerated(Image)} and called once in the
+     * constructor {@link #PreviewThumbnailCreator(Frame, Component, Scene,
+     * SceneManagerObserver, CommandController, Entity[])}.
+     *
+     * Select an entity, and then capture the next render.  When that is completed,
+     * this class receives a call-back in the thumbnailGenerated method.
+     *
+     * Note:  index is checked to be within the range [0,entities.length-1], and if it
+     *        is not in this range, dispose() is called on this window, effectively
+     *        returning to calling code.
+     *
+     * @param index - An index into the entities array
+     */
+    private void generateThumbnail(int index) {
+
+        // Make sure it's a valid request, otherwise, exit
+        if ((index >= 0) && (index < entities.length)) {
+
+            Entity entity = entities[index];
+            Command cmd = null;
+
+            // Different commands for entity types
+            switch (entity.getType()) {
+            case Entity.TYPE_VIEWPOINT:
+
+                vis_perspective.setEnabled(true);
+
+                entity.addEntitySelectionListener(this);
+
+                location.setGroundNormal(groundNormal);
+
+                if (entity.isSelected()) {
+                    cmd = new SelectEntityCommand(model, entity, false);
+                    controller.execute(cmd);
+                }
+                cmd = new SelectEntityCommand(model, entity, true);
+                controller.execute(cmd);
+
+                break;
+
+                // Walls / Floor are either a Segment or a Zone
+            case Entity.TYPE_SEGMENT:
+            case Entity.TYPE_ZONE:
+
+                ZoneEntity ze = (ZoneEntity)entity;
+
+                if (ortho == null) {
+                    // create a temporary viewpoint for zone imaging
+                    ortho = createOrthographicViewpoint();
+                    ViewpointContainerEntity vce =
+                        location.getViewpointContainerEntity();
+                    cmd = new AddEntityChildCommand(model, vce, ortho);
+                    controller.execute(cmd);
+
+                    ortho.addEntitySelectionListener(this);
+                }
+
+                vis_perspective.setEnabled(false);
+
+                location.setGroundNormal(new float[]{0, 1, 0});
+
+                // set the visibility of products by zone
+                vis_orthographic.setActiveZoneEntity(ze);
+
+                // note: always select the viewpoint before configuring
+                // it's parameters
+                if (ortho.isSelected()) {
+                    cmd = new SelectEntityCommand(model, ortho, false);
+                    controller.execute(cmd);
+                }
+                cmd = new SelectEntityCommand(model, ortho, true);
+                controller.execute(cmd);
+
+                // configure the viewpoint parameters
+                zoneView.configView(ze, ortho);
+
+                break;
+            }
+        }
+    }
+
+    /**
+     * Create and return a viewpoint entity for zone imaging
+     *
+     * @return A ViewpointEntity
+     */
+    private ViewpointEntity createOrthographicViewpoint() {
+
+        HashMap<String, Map<String, Object>> vpProps =
+            new HashMap<String, Map<String, Object>>();
+        HashMap<String, Object> vpParams = new HashMap<String, Object>();
+        HashMap<String, Object> vpPropSheet = new HashMap<String, Object>();
+
+        vpPropSheet.put(
+            Entity.NAME_PROP,
+            this.getClass().getName());
+
+        vpPropSheet.put(
+            ViewpointEntity.START_VIEW_MATRIX_PROP,
+            new float[16]);
+
+        vpPropSheet.put(
+            ViewpointEntity.PROJECTION_TYPE_PROP,
+            AV3DConstants.ORTHOGRAPHIC);
+
+        vpPropSheet.put(
+            ViewpointEntity.VIEW_IDENTIFIER_PROP,
+            preview.getIdentifier());
+
+        vpProps.put(Entity.ENTITY_PARAMS, vpParams);
+        vpProps.put(Entity.DEFAULT_ENTITY_PROPERTIES, vpPropSheet);
+
+        ViewpointEntity ve = new ViewpointEntity(
+            model.issueEntityID(),
+            vpProps);
+
+        return(ve);
+    }
+}
